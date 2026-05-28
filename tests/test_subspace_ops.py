@@ -1,6 +1,8 @@
 import numpy as np
 
 from mri_project.recon.subspace_ops import (
+    multicoil_subspace_nufft_adjoint,
+    multicoil_subspace_nufft_forward,
     subspace_expand,
     subspace_nufft_adjoint,
     subspace_nufft_forward,
@@ -49,6 +51,21 @@ def make_subspace_coord(n_tr=6, shape=(24, 24), n_samples=80):
     return coord
 
 
+def make_sens_maps(n_coils=3, shape=(24, 24)):
+    yy, xx = np.meshgrid(
+        np.linspace(-1.0, 1.0, shape[0], dtype=np.float32),
+        np.linspace(-1.0, 1.0, shape[1], dtype=np.float32),
+        indexing="ij",
+    )
+    sens_maps = np.empty((n_coils, *shape), dtype=np.complex64)
+    for coil in range(n_coils):
+        angle = 2.0 * np.pi * coil / n_coils
+        magnitude = 0.7 + 0.3 * np.exp(-((xx - 0.4 * np.cos(angle)) ** 2 + (yy - 0.4 * np.sin(angle)) ** 2))
+        phase = np.exp(1j * 0.2 * (xx * np.cos(angle) + yy * np.sin(angle)))
+        sens_maps[coil] = magnitude * phase
+    return sens_maps
+
+
 def test_subspace_ops_shapes_and_adjointness():
     n_tr = 6
     rank = 3
@@ -83,6 +100,39 @@ def test_subspace_ops_shapes_and_adjointness():
     y = (rng.normal(size=(n_tr, n_samples)) + 1j * rng.normal(size=(n_tr, n_samples))).astype(np.complex64)
     lhs = np.vdot(subspace_nufft_forward(coeff_maps, basis, coord), y)
     rhs = np.vdot(coeff_maps, subspace_nufft_adjoint(y, basis, coord, shape))
+
+    denom = max(abs(lhs), abs(rhs), 1.0)
+    assert abs(lhs - rhs) / denom < 1e-3
+
+
+def test_multicoil_subspace_ops_shapes_and_adjointness():
+    n_tr = 4
+    rank = 2
+    shape = (12, 12)
+    n_samples = 32
+    n_coils = 3
+
+    basis = make_complex_basis(n_tr=n_tr, rank=rank, seed=30)
+    coeff_maps = make_coeff_maps(rank=rank, shape=shape, seed=31)
+    coord = make_subspace_coord(n_tr=n_tr, shape=shape, n_samples=n_samples)
+    sens_maps = make_sens_maps(n_coils=n_coils, shape=shape)
+
+    kspace = multicoil_subspace_nufft_forward(coeff_maps, basis, coord, sens_maps)
+    assert kspace.shape == (n_coils, n_tr, n_samples)
+    assert np.iscomplexobj(kspace)
+    assert np.all(np.isfinite(kspace))
+
+    adjoint_coeff_maps = multicoil_subspace_nufft_adjoint(kspace, basis, coord, shape, sens_maps)
+    assert adjoint_coeff_maps.shape == (rank, *shape)
+    assert np.iscomplexobj(adjoint_coeff_maps)
+    assert np.all(np.isfinite(adjoint_coeff_maps))
+
+    rng = np.random.default_rng(32)
+    y = (rng.normal(size=(n_coils, n_tr, n_samples)) + 1j * rng.normal(size=(n_coils, n_tr, n_samples))).astype(
+        np.complex64
+    )
+    lhs = np.vdot(multicoil_subspace_nufft_forward(coeff_maps, basis, coord, sens_maps), y)
+    rhs = np.vdot(coeff_maps, multicoil_subspace_nufft_adjoint(y, basis, coord, shape, sens_maps))
 
     denom = max(abs(lhs), abs(rhs), 1.0)
     assert abs(lhs - rhs) / denom < 1e-3

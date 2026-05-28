@@ -2,6 +2,8 @@
 
 from .iterative import reconstruct_subspace_gd
 from .subspace_ops import (
+    multicoil_subspace_nufft_adjoint,
+    multicoil_subspace_nufft_forward,
     subspace_expand,
     subspace_nufft_adjoint,
     subspace_nufft_forward,
@@ -10,6 +12,8 @@ from .subspace_ops import (
 
 __all__ = [
     "reconstruct_subspace_gd",
+    "multicoil_subspace_nufft_forward",
+    "multicoil_subspace_nufft_adjoint",
     "subspace_expand",
     "subspace_project",
     "subspace_nufft_forward",

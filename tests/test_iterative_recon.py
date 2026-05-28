@@ -1,7 +1,7 @@
 import numpy as np
 
 from mri_project.recon.iterative import reconstruct_subspace_gd
-from mri_project.recon.subspace_ops import subspace_nufft_forward
+from mri_project.recon.subspace_ops import multicoil_subspace_nufft_forward, subspace_nufft_forward
 
 
 def make_complex_basis(n_tr=3, rank=2, seed=20):
@@ -27,6 +27,21 @@ def make_coord(n_tr=3, n_samples=16):
     return coord
 
 
+def make_sens_maps(n_coils=2, shape=(8, 8)):
+    yy, xx = np.meshgrid(
+        np.linspace(-1.0, 1.0, shape[0], dtype=np.float32),
+        np.linspace(-1.0, 1.0, shape[1], dtype=np.float32),
+        indexing="ij",
+    )
+    sens_maps = np.empty((n_coils, *shape), dtype=np.complex64)
+    for coil in range(n_coils):
+        angle = 2.0 * np.pi * coil / n_coils
+        magnitude = 0.8 + 0.2 * np.exp(-((xx - 0.4 * np.cos(angle)) ** 2 + (yy - 0.4 * np.sin(angle)) ** 2))
+        phase = np.exp(1j * 0.15 * (xx * np.cos(angle) + yy * np.sin(angle)))
+        sens_maps[coil] = magnitude * phase
+    return sens_maps
+
+
 def test_reconstruct_subspace_gd_reduces_loss():
     shape = (8, 8)
     basis = make_complex_basis()
@@ -41,6 +56,31 @@ def test_reconstruct_subspace_gd_reduces_loss():
         shape,
         n_iter=8,
         step_size=1e-5,
+    )
+
+    assert coeff_maps.shape == (basis.shape[1], *shape)
+    assert np.iscomplexobj(coeff_maps)
+    assert len(losses) == 8
+    assert np.all(np.isfinite(losses))
+    assert losses[-1] < losses[0]
+
+
+def test_reconstruct_subspace_gd_reduces_multicoil_loss():
+    shape = (8, 8)
+    basis = make_complex_basis(seed=40)
+    coeff_true = make_coeff_maps(shape=shape, seed=41)
+    coord = make_coord(n_tr=basis.shape[0])
+    sens_maps = make_sens_maps(shape=shape)
+    kspace = multicoil_subspace_nufft_forward(coeff_true, basis, coord, sens_maps).astype(np.complex64)
+
+    coeff_maps, losses = reconstruct_subspace_gd(
+        kspace,
+        basis,
+        coord,
+        shape,
+        n_iter=8,
+        step_size=5e-6,
+        sens_maps=sens_maps,
     )
 
     assert coeff_maps.shape == (basis.shape[1], *shape)
