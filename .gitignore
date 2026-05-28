@@ -206,6 +206,16 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Local project artifacts
+.numba_cache/
+outputs/
+data/processed/
+data/output/
+*.npy
+*.npz
+!data/examples/
+!data/examples/**
+
 # PyPI configuration file
 .pypirc
 
