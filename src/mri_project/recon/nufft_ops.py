@@ -1,15 +1,52 @@
-"""Minimal 2D NUFFT operators built on SigPy."""
+"""Minimal 2D NUFFT operators built on SigPy.
+
+SigPy is imported lazily because its Numba-backed import path can be slow when
+Numba has to probe an unsuitable cache location. Before importing SigPy, this
+module sets a writable default ``NUMBA_CACHE_DIR`` when the user has not already
+provided one.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+import os
+from pathlib import Path
+import tempfile
+from types import ModuleType
 
 import numpy as np
 
-try:
-    import sigpy as sp
-except ModuleNotFoundError:  # pragma: no cover - exercised only when SigPy is absent.
-    sp = None
+_SIGPY: ModuleType | None = None
+_SIGPY_IMPORT_ATTEMPTED = False
+
+
+def _ensure_numba_cache_dir() -> None:
+    """Give Numba a stable writable cache directory before SigPy registers JIT kernels."""
+
+    if os.environ.get("NUMBA_CACHE_DIR"):
+        return
+
+    cache_dir = Path(tempfile.gettempdir()) / "mri_project_numba_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["NUMBA_CACHE_DIR"] = str(cache_dir)
+
+
+def _get_sigpy() -> ModuleType | None:
+    """Import SigPy only when a NUFFT operator is actually executed."""
+
+    global _SIGPY, _SIGPY_IMPORT_ATTEMPTED
+
+    if not _SIGPY_IMPORT_ATTEMPTED:
+        _SIGPY_IMPORT_ATTEMPTED = True
+        _ensure_numba_cache_dir()
+        try:
+            import sigpy as sp
+        except ModuleNotFoundError:  # pragma: no cover - exercised only when SigPy is absent.
+            _SIGPY = None
+        else:
+            _SIGPY = sp
+
+    return _SIGPY
 
 
 def _validate_image(image: np.ndarray) -> np.ndarray:
@@ -54,6 +91,7 @@ def nufft_forward(image: np.ndarray, coord: np.ndarray) -> np.ndarray:
 
     image = _validate_image(image)
     coord = _validate_coord(coord)
+    sp = _get_sigpy()
 
     if sp is None:
         kspace = _direct_nudft_forward(image, coord)
@@ -71,6 +109,7 @@ def nufft_adjoint(kspace: np.ndarray, coord: np.ndarray, img_shape: Sequence[int
     coord = _validate_coord(coord)
     kspace = _validate_kspace(kspace, coord)
     shape = _validate_img_shape(img_shape)
+    sp = _get_sigpy()
 
     if sp is None:
         image = _direct_nudft_adjoint(kspace, coord, shape)
