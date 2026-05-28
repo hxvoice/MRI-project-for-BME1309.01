@@ -1,6 +1,6 @@
 import numpy as np
 
-from mri_project.recon import nufft_adjoint, nufft_forward
+from mri_project.recon.nufft_ops import nufft_adjoint, nufft_forward
 
 
 def make_random_phantom(shape=(32, 32), n_blobs=5, seed=0):

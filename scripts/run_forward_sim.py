@@ -7,7 +7,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mri_project.forward import simulate_kspace
+from mri_project.forward.simulation import simulate_kspace
 from mri_project.forward.io import save_npy
 
 

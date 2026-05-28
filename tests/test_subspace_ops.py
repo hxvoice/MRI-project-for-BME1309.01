@@ -1,6 +1,6 @@
 import numpy as np
 
-from mri_project.recon import (
+from mri_project.recon.subspace_ops import (
     subspace_expand,
     subspace_nufft_adjoint,
     subspace_nufft_forward,

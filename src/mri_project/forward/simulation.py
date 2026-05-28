@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from mri_project.recon import nufft_forward
+from mri_project.recon.nufft_ops import nufft_forward
 
 
 def _nearest_indices(values: np.ndarray, grid: np.ndarray) -> np.ndarray:

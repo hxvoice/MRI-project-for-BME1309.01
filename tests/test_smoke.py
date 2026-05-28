@@ -7,7 +7,8 @@ from mri_project.dictionary import (
     compress_dictionary,
     generate_mrf_fa_train_spline,
 )
-from mri_project.forward import generate_tga_trajectory, prepare_phantom, simulate_kspace
+from mri_project.forward import generate_tga_trajectory, prepare_phantom
+from mri_project.forward.simulation import simulate_kspace
 
 
 def test_core_imports_and_forward_shapes():
