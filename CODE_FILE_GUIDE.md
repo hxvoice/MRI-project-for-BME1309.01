@@ -69,7 +69,7 @@
 | `scripts/prepare_phantom.py` | 生成简化 2D 脑部参数体模，包含 T1、T2 和 PD 三通道，保存为 `data/processed/brain_param_map_2d.npy` 和 `data/processed/simulated_brain_phantom.png`。 |
 | `scripts/build_dictionary.py` | 生成 MRF 翻转角序列，使用 EPG 模型构建信号字典，对字典做 SVD 子空间压缩，并保存 `data/processed/mrf_dictionary_data.npz`。 |
 | `scripts/run_forward_sim.py` | 读取体模、轨迹和字典，模拟多线圈非笛卡尔 k-space 采集数据，加入噪声后保存为 `data/output/mrf_kspace_2d_noisy.npy`。 |
-| `scripts/template_matching.py` | 模板匹配流程入口；加载 `data/processed/mrf_dictionary_data.npz` 中的压缩字典，调用包内模板匹配函数，当前用 mock 子空间系数图测试流程，并显示 T1、T2、PD 定量图。 |
+| `scripts/template_matching.py` | 模板匹配流程入口；加载 `data/processed/mrf_dictionary_data.npz` 中的压缩字典，读取 B 部分输出的 `data/output/reconstructed_coeff_maps.npy`，调用包内模板匹配函数，并显示 T1、T2、PD 定量图。 |
 
 推荐运行顺序：
 
@@ -81,7 +81,7 @@ python scripts/run_forward_sim.py
 python scripts/template_matching.py
 ```
 
-其中 `template_matching.py` 当前仍使用 mock 系数图；真实重建系数图接入后，应将输入替换为重建模块输出。
+其中 `template_matching.py` 要求 `data/output/reconstructed_coeff_maps.npy` 已由重建流程生成，且数组形状为 `(H, W, rank)`，最后一维 `rank` 需与压缩字典的 rank 一致。
 
 ## Python 包入口
 
@@ -154,7 +154,7 @@ run_forward_sim.py
 
 template_matching.py
     <- compressed dictionary
-    <- mock coeff maps, later replace with reconstructed coeff maps
+    <- data/output/reconstructed_coeff_maps.npy
     -> displayed T1/T2/PD maps
 ```
 
