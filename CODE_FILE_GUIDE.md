@@ -157,12 +157,3 @@ template_matching.py
     <- data/output/reconstructed_coeff_maps.npy
     -> displayed T1/T2/PD maps
 ```
-
-## 文件结构建议
-
-当前结构已经比较清楚：`src/mri_project/` 放可复用包代码，`scripts/` 放流程入口，`tests/` 放测试。后续如果项目继续扩展，可以考虑以下调整：
-
-1. 如果可视化函数继续增多，可以新建 `src/mri_project/visualization/`，把轨迹图、体模图、定量图绘制集中管理；目前规模下保留在 `forward/io.py` 和脚本中也可以接受。
-2. 如果要交付完整端到端流程，可以新增 `scripts/run_full_pipeline.py`，按顺序调用轨迹、体模、字典、前向仿真、重建和模板匹配，减少手动运行多个脚本的出错概率。
-3. 如果后续要保留少量可复现实验输入，可以使用 `data/examples/` 存放小型示例数据；大体积生成结果继续放在 `data/processed/` 或 `data/output/` 并保持不提交。
-4. 如果文档继续增加，可以新建 `docs/`，把本文件、算法说明、实验记录和结果说明集中到文档目录中；当前只有 README 和代码指南时，放在根目录也足够直观。
