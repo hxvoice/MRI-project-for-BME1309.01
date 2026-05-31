@@ -70,11 +70,36 @@ def _validate_subspace_kspace(kspace: np.ndarray, coord: np.ndarray) -> np.ndarr
     return kspace
 
 
+def _validate_multicoil_kspace(kspace: np.ndarray, coord: np.ndarray, n_coils: int) -> np.ndarray:
+    kspace = np.asarray(kspace)
+    expected_shape = (n_coils, *coord.shape[:2])
+    assert kspace.ndim == 3, f"kspace must have shape (n_coils, n_tr, n_samples), got {kspace.shape}"
+    assert kspace.shape == expected_shape, f"kspace shape {kspace.shape} must match expected shape {expected_shape}"
+    assert np.iscomplexobj(kspace), "kspace must be complex-valued"
+    assert np.all(np.isfinite(kspace)), "kspace contains non-finite values"
+    return kspace
+
+
 def _validate_img_shape(img_shape: Sequence[int]) -> tuple[int, int]:
     assert len(img_shape) == 2, f"img_shape must have length 2, got {img_shape}"
     shape = tuple(int(size) for size in img_shape)
     assert all(size > 0 for size in shape), f"img_shape must be positive, got {img_shape}"
     return shape
+
+
+def _validate_sens_maps(sens_maps: np.ndarray, img_shape: Sequence[int] | None = None) -> np.ndarray:
+    sens_maps = np.asarray(sens_maps)
+    assert sens_maps.ndim == 3, f"sens_maps must have shape (n_coils, H, W), got {sens_maps.shape}"
+    assert sens_maps.shape[0] > 0, "sens_maps must contain at least one coil"
+    assert sens_maps.shape[1] > 0 and sens_maps.shape[2] > 0, (
+        f"sens_maps spatial shape must be positive, got {sens_maps.shape[1:]}"
+    )
+    if img_shape is not None:
+        shape = _validate_img_shape(img_shape)
+        assert sens_maps.shape[1:] == shape, f"sens_maps spatial shape {sens_maps.shape[1:]} must match {shape}"
+    assert np.iscomplexobj(sens_maps), "sens_maps must be complex-valued"
+    assert np.all(np.isfinite(sens_maps)), "sens_maps contains non-finite values"
+    return sens_maps
 
 
 def subspace_expand(coeff_maps: np.ndarray, basis: np.ndarray) -> np.ndarray:
@@ -126,6 +151,35 @@ def subspace_nufft_forward(coeff_maps: np.ndarray, basis: np.ndarray, coord: np.
     return kspace
 
 
+def multicoil_subspace_nufft_forward(
+    coeff_maps: np.ndarray,
+    basis: np.ndarray,
+    coord: np.ndarray,
+    sens_maps: np.ndarray,
+) -> np.ndarray:
+    """Apply the multi-coil ``P F S Phi`` subspace forward operator."""
+
+    basis = _validate_basis(basis)
+    coeff_maps = _validate_coeff_maps(coeff_maps, basis)
+    coord = _validate_subspace_coord(coord, basis.shape[0])
+    sens_maps = _validate_sens_maps(sens_maps, coeff_maps.shape[1:])
+
+    time_images = subspace_expand(coeff_maps, basis)
+    n_coils = sens_maps.shape[0]
+    kspace = np.empty((n_coils, *coord.shape[:2]), dtype=np.result_type(time_images.dtype, sens_maps.dtype, np.complex64))
+
+    for coil in range(n_coils):
+        for tr_index in range(basis.shape[0]):
+            coil_image = time_images[tr_index] * sens_maps[coil]
+            kspace[coil, tr_index] = nufft_forward(coil_image, coord[tr_index])
+
+    expected_shape = (n_coils, *coord.shape[:2])
+    assert kspace.shape == expected_shape, (
+        f"multicoil_subspace_nufft_forward returned shape {kspace.shape}, expected {expected_shape}"
+    )
+    return kspace
+
+
 def subspace_nufft_adjoint(
     kspace: np.ndarray,
     basis: np.ndarray,
@@ -147,5 +201,34 @@ def subspace_nufft_adjoint(
     expected_shape = (basis.shape[1], *shape)
     assert coeff_maps.shape == expected_shape, (
         f"subspace_nufft_adjoint returned shape {coeff_maps.shape}, expected {expected_shape}"
+    )
+    return coeff_maps
+
+
+def multicoil_subspace_nufft_adjoint(
+    kspace: np.ndarray,
+    basis: np.ndarray,
+    coord: np.ndarray,
+    img_shape: Sequence[int],
+    sens_maps: np.ndarray,
+) -> np.ndarray:
+    """Apply the adjoint of the multi-coil ``P F S Phi`` subspace operator."""
+
+    basis = _validate_basis(basis)
+    coord = _validate_subspace_coord(coord, basis.shape[0])
+    shape = _validate_img_shape(img_shape)
+    sens_maps = _validate_sens_maps(sens_maps, shape)
+    kspace = _validate_multicoil_kspace(kspace, coord, sens_maps.shape[0])
+
+    time_images = np.zeros((basis.shape[0], *shape), dtype=np.result_type(kspace.dtype, sens_maps.dtype, np.complex64))
+    for coil in range(sens_maps.shape[0]):
+        for tr_index in range(basis.shape[0]):
+            coil_adjoint = nufft_adjoint(kspace[coil, tr_index], coord[tr_index], shape)
+            time_images[tr_index] += np.conj(sens_maps[coil]) * coil_adjoint
+
+    coeff_maps = subspace_project(time_images, basis)
+    expected_shape = (basis.shape[1], *shape)
+    assert coeff_maps.shape == expected_shape, (
+        f"multicoil_subspace_nufft_adjoint returned shape {coeff_maps.shape}, expected {expected_shape}"
     )
     return coeff_maps
