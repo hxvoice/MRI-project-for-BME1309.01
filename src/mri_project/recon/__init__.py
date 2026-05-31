@@ -2,6 +2,7 @@
 
 from .iterative import reconstruct_subspace_gd, reconstruct_subspace_llr
 from .regularization import llr_nuclear_norm, llr_soft_threshold
+from .sensitivity import estimate_sens_maps_espirit, grid_center_calibration_kspace, time_average_kspace
 from .subspace_ops import (
     multicoil_subspace_nufft_adjoint,
     multicoil_subspace_nufft_forward,
@@ -16,6 +17,9 @@ __all__ = [
     "reconstruct_subspace_llr",
     "llr_soft_threshold",
     "llr_nuclear_norm",
+    "estimate_sens_maps_espirit",
+    "grid_center_calibration_kspace",
+    "time_average_kspace",
     "multicoil_subspace_nufft_forward",
     "multicoil_subspace_nufft_adjoint",
     "subspace_expand",
