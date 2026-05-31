@@ -1,6 +1,6 @@
 import numpy as np
 
-from mri_project.recon.iterative import reconstruct_subspace_gd
+from mri_project.recon.iterative import reconstruct_subspace_gd, reconstruct_subspace_llr
 from mri_project.recon.subspace_ops import multicoil_subspace_nufft_forward, subspace_nufft_forward
 
 
@@ -88,3 +88,79 @@ def test_reconstruct_subspace_gd_reduces_multicoil_loss():
     assert len(losses) == 8
     assert np.all(np.isfinite(losses))
     assert losses[-1] < losses[0]
+
+
+def test_reconstruct_subspace_llr_reduces_loss():
+    shape = (8, 8)
+    basis = make_complex_basis(seed=60)
+    coeff_true = make_coeff_maps(shape=shape, seed=61)
+    coord = make_coord(n_tr=basis.shape[0])
+    kspace = subspace_nufft_forward(coeff_true, basis, coord).astype(np.complex64)
+
+    coeff_maps, losses = reconstruct_subspace_llr(
+        kspace,
+        basis,
+        coord,
+        shape,
+        n_iter=8,
+        step_size=1e-5,
+        lambda_llr=1e-4,
+        patch_shape=(4, 4),
+    )
+
+    assert coeff_maps.shape == (basis.shape[1], *shape)
+    assert np.iscomplexobj(coeff_maps)
+    assert len(losses) == 8
+    assert np.all(np.isfinite(losses))
+    assert losses[-1] < losses[0]
+
+
+def test_reconstruct_subspace_llr_reduces_multicoil_loss():
+    shape = (8, 8)
+    basis = make_complex_basis(seed=70)
+    coeff_true = make_coeff_maps(shape=shape, seed=71)
+    coord = make_coord(n_tr=basis.shape[0])
+    sens_maps = make_sens_maps(shape=shape)
+    kspace = multicoil_subspace_nufft_forward(coeff_true, basis, coord, sens_maps).astype(np.complex64)
+
+    coeff_maps, losses = reconstruct_subspace_llr(
+        kspace,
+        basis,
+        coord,
+        shape,
+        n_iter=8,
+        step_size=5e-6,
+        lambda_llr=1e-4,
+        patch_shape=(4, 4),
+        sens_maps=sens_maps,
+    )
+
+    assert coeff_maps.shape == (basis.shape[1], *shape)
+    assert np.iscomplexobj(coeff_maps)
+    assert len(losses) == 8
+    assert np.all(np.isfinite(losses))
+    assert losses[-1] < losses[0]
+
+
+def test_reconstruct_subspace_llr_runs_without_regularization():
+    shape = (8, 8)
+    basis = make_complex_basis(seed=80)
+    coeff_true = make_coeff_maps(shape=shape, seed=81)
+    coord = make_coord(n_tr=basis.shape[0])
+    kspace = subspace_nufft_forward(coeff_true, basis, coord).astype(np.complex64)
+
+    coeff_maps, losses = reconstruct_subspace_llr(
+        kspace,
+        basis,
+        coord,
+        shape,
+        n_iter=4,
+        step_size=1e-5,
+        lambda_llr=0.0,
+        patch_shape=(4, 4),
+    )
+
+    assert coeff_maps.shape == (basis.shape[1], *shape)
+    assert np.iscomplexobj(coeff_maps)
+    assert len(losses) == 4
+    assert np.all(np.isfinite(losses))
