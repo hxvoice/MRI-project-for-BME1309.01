@@ -49,6 +49,7 @@
 | `src/mri_project/recon/subspace_ops.py` | 实现 MRF 子空间展开/投影，以及单线圈、多线圈的子空间 NUFFT 前向和伴随算子。 |
 | `src/mri_project/recon/iterative.py` | 实现子空间系数图的迭代重建；包含数据一致性梯度下降 `reconstruct_subspace_gd` 和带 LLR 正则的 `reconstruct_subspace_llr`。 |
 | `src/mri_project/recon/regularization.py` | 实现局部低秩正则化工具，包括 non-overlapping patch 的奇异值软阈值 `llr_soft_threshold` 和 LLR 核范数计算。 |
+| `src/mri_project/recon/sensitivity.py` | 从多线圈、多 TR 非笛卡尔 k-space 中估计线圈敏感度图；包含时间均值、中心低频样本网格化和 SigPy ESPIRiT 调用。 |
 
 ## 测试文件
 
@@ -59,4 +60,4 @@
 | `tests/test_subspace_ops.py` | 测试子空间展开/投影、单线圈和多线圈子空间 NUFFT 算子的形状、有限性与伴随一致性。 |
 | `tests/test_iterative_recon.py` | 测试子空间梯度下降和 LLR 重建在单线圈、多线圈小规模问题上能降低 loss，并验证无正则路径可运行。 |
 | `tests/test_regularization.py` | 测试 LLR 正则化函数的形状、dtype、有限性、零阈值复制行为、核范数下降和非法参数检查。 |
-
+| `tests/test_sensitivity.py` | 测试多 TR k-space 时间均值、中心校准 k-space 网格化，以及 ESPIRiT 敏感度图估计接口的输出形状和有限性。 |
