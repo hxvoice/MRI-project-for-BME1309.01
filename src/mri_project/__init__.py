@@ -1,3 +1,3 @@
 """MRI project package for BME1309.01."""
 
-__all__ = ["forward", "recon", "dictionary"]
+__all__ = ["forward", "recon", "dictionary", "quantification"]
