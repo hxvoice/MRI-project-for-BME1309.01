@@ -15,6 +15,7 @@
 │   ├── generate_traj.py
 │   ├── prepare_phantom.py
 │   ├── run_forward_sim.py
+│   ├── run_recon.py
 │   └── template_matching.py
 ├── src/
 │   └── mri_project/
@@ -69,6 +70,7 @@
 | `scripts/prepare_phantom.py` | 生成简化 2D 脑部参数体模，包含 T1、T2 和 PD 三通道，保存为 `data/processed/brain_param_map_2d.npy` 和 `data/processed/simulated_brain_phantom.png`。 |
 | `scripts/build_dictionary.py` | 生成 MRF 翻转角序列，使用 EPG 模型构建信号字典，对字典做 SVD 子空间压缩，并保存 `data/processed/mrf_dictionary_data.npz`。 |
 | `scripts/run_forward_sim.py` | 读取体模、轨迹和字典，模拟多线圈非笛卡尔 k-space 采集数据，加入噪声后保存为 `data/output/mrf_kspace_2d_noisy.npy`。 |
+| `scripts/run_recon.py` | 读取 noisy k-space、轨迹和字典子空间基，估计线圈敏感度图，执行带 LLR 正则的子空间重建，并保存 `data/output/reconstructed_coeff_maps.npy`。 |
 | `scripts/template_matching.py` | 模板匹配流程入口；加载 `data/processed/mrf_dictionary_data.npz` 中的压缩字典，读取 B 部分输出的 `data/output/reconstructed_coeff_maps.npy`，调用包内模板匹配函数，并显示 T1、T2、PD 定量图。 |
 
 推荐运行顺序：
@@ -78,10 +80,11 @@ python scripts/generate_traj.py
 python scripts/prepare_phantom.py
 python scripts/build_dictionary.py
 python scripts/run_forward_sim.py
+python scripts/run_recon.py
 python scripts/template_matching.py
 ```
 
-其中 `template_matching.py` 要求 `data/output/reconstructed_coeff_maps.npy` 已由重建流程生成，且数组形状为 `(H, W, rank)`，最后一维 `rank` 需与压缩字典的 rank 一致。
+其中 `run_recon.py` 默认重建图像尺寸为 `220x220`，可通过 `--img-shape H W` 调整；`template_matching.py` 要求 `data/output/reconstructed_coeff_maps.npy` 已由重建流程生成，且数组形状为 `(H, W, rank)`，最后一维 `rank` 需与压缩字典的 rank 一致。
 
 ## Python 包入口
 
@@ -151,6 +154,12 @@ build_dictionary.py
 run_forward_sim.py
     <- trajectory + phantom + dictionary
     -> data/output/mrf_kspace_2d_noisy.npy
+
+run_recon.py
+    <- data/output/mrf_kspace_2d_noisy.npy
+    <- data/processed/traj_full_2d.npy
+    <- dictionary bases
+    -> data/output/reconstructed_coeff_maps.npy
 
 template_matching.py
     <- compressed dictionary
