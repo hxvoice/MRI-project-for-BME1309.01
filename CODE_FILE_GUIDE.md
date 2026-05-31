@@ -8,6 +8,7 @@
 .
 ├── .gitignore
 ├── CODE_FILE_GUIDE.md
+├── main.py
 ├── README.md
 ├── pyproject.toml
 ├── scripts/
@@ -56,6 +57,7 @@
 | 文件 | 作用 |
 | --- | --- |
 | `.gitignore` | 忽略 Python 缓存、虚拟环境、测试缓存、本地生成的 `.npy`/`.npz` 数据、`data/processed/`、`data/output/`、`outputs/` 和 `.numba_cache/` 等文件。 |
+| `main.py` | 根目录一键全流程入口，按顺序执行轨迹生成、体模准备、字典构建、前向模拟、子空间 LLR 重建和模板匹配绘图。 |
 | `README.md` | 项目总览，说明包结构、安装命令、推荐脚本运行顺序和测试方式。 |
 | `pyproject.toml` | Python 包构建与测试配置；声明项目依赖 `matplotlib`、`numpy`、`scipy`、`sigpy`，配置 `src` 布局和 pytest 搜索路径。 |
 | `CODE_FILE_GUIDE.md` | 当前文件，按目录说明各代码文件职责。 |
@@ -63,6 +65,14 @@
 ## 流程脚本
 
 这些脚本是面向实验流程的命令行入口，通常从仓库根目录运行。
+
+完整流程可直接运行：
+
+```bash
+python main.py
+```
+
+`main.py` 会强制依次执行下列脚本；其中重建阶段的 `--n-iter`、`--lambda-llr`、`--step-size`、`--img-shape`、`--patch-shape`、`--center-width` 和 `--calib-width` 参数可从 `main.py` 透传给 `scripts/run_recon.py`。
 
 | 文件 | 作用 |
 | --- | --- |
