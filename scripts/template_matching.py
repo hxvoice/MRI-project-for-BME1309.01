@@ -9,7 +9,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mri_project.quantification import execute_template_matching, generate_mock_coeff_maps
+from mri_project.quantification import execute_template_matching
 
 
 def plot_quantitative_maps(t1_map: np.ndarray, t2_map: np.ndarray, pd_map: np.ndarray) -> None:
@@ -57,12 +57,15 @@ def main() -> None:
     dict_compressed, t1_grid, t2_grid = load_dictionary(dict_path)
     print(f"[Init] 成功加载! 字典维度: {dict_compressed.shape}")
 
-    print("\n[Mock] 正在生成用于测试的伪造 2D 系数图...")
-    coeff_maps_input = generate_mock_coeff_maps(t1_grid, t2_grid, dict_compressed)
-    print(f"[Mock] 成功伪造系数图! 维度: {coeff_maps_input.shape}")
-
-    # When reconstructed coefficient maps are ready, replace the mock line above
-    # with loading the reconstruction output.
+    coeff_maps_path = (
+        Path(__file__).resolve().parents[1]
+        / "data"
+        / "output"
+        / "reconstructed_coeff_maps.npy"
+    )
+    print(f"\n[Data] 正在加载真实重建系数图:\n{coeff_maps_path}")
+    coeff_maps_input = np.load(coeff_maps_path)
+    print(f"[Data] 成功加载! 系数图维度: {coeff_maps_input.shape}")
 
     print("\n[Match] 开始执行大规模内积匹配 (Template Matching)...")
     start_time = time.time()
