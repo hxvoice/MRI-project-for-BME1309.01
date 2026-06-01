@@ -3,14 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+import pipeline_config as config
 from mri_project.forward import prepare_phantom
 
 
 def main() -> None:
     output_dir = Path("data/processed")
     prepare_phantom(
+        shape=config.IMG_SHAPE,
         save_path=output_dir / "brain_param_map_2d.npy",
         figure_path=output_dir / "simulated_brain_phantom.png",
     )

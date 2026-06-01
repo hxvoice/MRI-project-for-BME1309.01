@@ -6,8 +6,11 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+import pipeline_config as config
 from mri_project.recon import estimate_sens_maps_espirit, reconstruct_subspace_llr
 
 
@@ -16,25 +19,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--n-iter",
         type=int,
-        default=30,
+        default=config.N_ITER,
         help="Number of LLR reconstruction iterations.",
     )
     parser.add_argument(
         "--lambda-llr",
         type=float,
-        default=1e-4,
+        default=config.LAMBDA_LLR,
         help="LLR regularization weight.",
     )
-    parser.add_argument("--step-size", type=float, default=1e-3, help="Gradient step size.")
-    parser.add_argument("--img-shape", type=int, nargs=2, default=(220, 220), metavar=("H", "W"))
-    parser.add_argument("--patch-shape", type=int, nargs=2, default=(8, 8), metavar=("H", "W"))
+    parser.add_argument("--step-size", type=float, default=config.STEP_SIZE, help="Gradient step size.")
+    parser.add_argument("--img-shape", type=int, nargs=2, default=config.IMG_SHAPE, metavar=("H", "W"))
+    parser.add_argument("--patch-shape", type=int, nargs=2, default=config.PATCH_SHAPE, metavar=("H", "W"))
     parser.add_argument(
         "--center-width",
         type=int,
-        default=24,
+        default=config.CENTER_WIDTH,
         help="Central k-space width for calibration gridding.",
     )
-    parser.add_argument("--calib-width", type=int, default=24, help="ESPIRiT calibration width.")
+    parser.add_argument("--calib-width", type=int, default=config.CALIB_WIDTH, help="ESPIRiT calibration width.")
     return parser.parse_args()
 
 

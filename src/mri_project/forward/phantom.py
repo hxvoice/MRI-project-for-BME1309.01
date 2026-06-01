@@ -10,7 +10,7 @@ from .io import plot_phantom, save_npy
 
 
 def prepare_phantom(
-    shape: tuple[int, int] = (220, 220),
+    shape: tuple[int, int] = (96, 96),
     save_path: str | Path | None = None,
     figure_path: str | Path | None = None,
 ) -> np.ndarray:

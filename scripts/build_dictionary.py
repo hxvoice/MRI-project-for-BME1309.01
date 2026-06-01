@@ -5,8 +5,11 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+import pipeline_config as config
 from mri_project.dictionary import (
     MRFEPGSimulator,
     build_signal_dictionary,
@@ -19,10 +22,10 @@ def main() -> None:
     output_dir = Path("data/processed")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    fa_train = generate_mrf_fa_train_spline()
-    simulator = MRFEPGSimulator(num_states=200)
+    fa_train = generate_mrf_fa_train_spline(num_trs=config.N_TR)
+    simulator = MRFEPGSimulator(num_states=config.EPG_NUM_STATES)
     signal_dict, t1_grid, t2_grid = build_signal_dictionary(simulator, fa_train)
-    compressed_dict, bases = compress_dictionary(signal_dict, rank=5)
+    compressed_dict, bases = compress_dictionary(signal_dict, rank=config.SUBSPACE_RANK)
 
     output_path = output_dir / "mrf_dictionary_data.npz"
     np.savez(

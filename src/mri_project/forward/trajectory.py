@@ -6,7 +6,7 @@ import numpy as np
 
 
 def generate_spiral_trajectory(
-    fov: float = 220e-3,
+    fov: float = 96e-3,
     res: float = 1e-3,
     readout_time: float = 7e-3,
     undersample_center: int = 12,

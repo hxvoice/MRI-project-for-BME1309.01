@@ -5,8 +5,11 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+import pipeline_config as config
 from mri_project.forward.simulation import simulate_kspace
 from mri_project.forward.io import save_npy
 
@@ -25,9 +28,9 @@ def main() -> None:
         t1_grid=dictionary_data["t1"],
         t2_grid=dictionary_data["t2"],
         traj=traj,
-        n_coils=12,
-        noise_level=0.25,
-        seed=42,
+        n_coils=config.N_COILS,
+        noise_level=config.NOISE_LEVEL,
+        seed=config.RANDOM_SEED,
     )
     save_npy(kspace, output_dir / "mrf_kspace_2d_noisy.npy")
     print(f"Saved noisy k-space to {output_dir / 'mrf_kspace_2d_noisy.npy'}")
