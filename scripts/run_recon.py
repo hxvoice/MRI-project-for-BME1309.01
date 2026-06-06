@@ -31,6 +31,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step-size", type=float, default=config.STEP_SIZE, help="Gradient step size.")
     parser.add_argument("--img-shape", type=int, nargs=2, default=config.IMG_SHAPE, metavar=("H", "W"))
     parser.add_argument("--patch-shape", type=int, nargs=2, default=config.PATCH_SHAPE, metavar=("H", "W"))
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu", help="Array backend used for reconstruction.")
+    parser.add_argument("--gpu-device", type=int, default=0, help="CUDA device id used when --device cuda is selected.")
     parser.add_argument(
         "--center-width",
         type=int,
@@ -97,6 +99,8 @@ def main() -> None:
         lambda_llr=args.lambda_llr,
         patch_shape=patch_shape,
         sens_maps=sens_maps,
+        device=args.device,
+        device_id=args.gpu_device,
     )
     print(f"[Recon] 重建系数图维度: {coeff_maps.shape}")
     if losses:

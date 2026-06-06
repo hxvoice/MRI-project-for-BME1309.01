@@ -26,6 +26,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Save the figure without opening the interactive popup window.",
     )
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu", help="Array backend used for matching.")
+    parser.add_argument("--gpu-device", type=int, default=0, help="CUDA device id used when --device cuda is selected.")
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Number of pixels matched per similarity batch. Use the full image when omitted.",
+    )
     return parser.parse_args()
 
 
@@ -98,6 +106,9 @@ def main() -> None:
         dict_compressed,
         t1_grid,
         t2_grid,
+        device=args.device,
+        device_id=args.gpu_device,
+        batch_size=args.batch_size,
     )
     num_pixels = coeff_maps_input.shape[0] * coeff_maps_input.shape[1]
     elapsed = time.time() - start_time

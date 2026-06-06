@@ -29,6 +29,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step-size", type=float, default=config.STEP_SIZE, help="Gradient step size.")
     parser.add_argument("--img-shape", type=int, nargs=2, default=config.IMG_SHAPE, metavar=("H", "W"))
     parser.add_argument("--patch-shape", type=int, nargs=2, default=config.PATCH_SHAPE, metavar=("H", "W"))
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu", help="Array backend for reconstruction/matching.")
+    parser.add_argument("--gpu-device", type=int, default=0, help="CUDA device id used when --device cuda is selected.")
+    parser.add_argument(
+        "--matching-batch-size",
+        type=int,
+        default=None,
+        help="Pixels per template-matching similarity batch. Uses the full image when omitted.",
+    )
     parser.add_argument(
         "--center-width",
         type=int,
@@ -166,6 +174,10 @@ def main() -> None:
         str(args.center_width),
         "--calib-width",
         str(args.calib_width),
+        "--device",
+        args.device,
+        "--gpu-device",
+        str(args.gpu_device),
     ]
 
     print(">>> Starting full 2D MRF pipeline <<<")
@@ -241,7 +253,19 @@ def main() -> None:
         env,
         "6/6 Template matching and plotting",
         "scripts/template_matching.py",
-        args=["--save-path", "data/output/quantitative_maps.png"],
+        args=[
+            "--save-path",
+            "data/output/quantitative_maps.png",
+            "--device",
+            args.device,
+            "--gpu-device",
+            str(args.gpu_device),
+            *(
+                ["--batch-size", str(args.matching_batch_size)]
+                if args.matching_batch_size is not None
+                else []
+            ),
+        ],
     )
     print("\n>>> Full 2D MRF pipeline finished <<<")
 

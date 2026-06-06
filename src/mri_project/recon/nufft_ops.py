@@ -16,6 +16,8 @@ from types import ModuleType
 
 import numpy as np
 
+from mri_project.array_backend import ArrayBackend, get_array_backend
+
 _SIGPY: ModuleType | None = None
 _SIGPY_IMPORT_ATTEMPTED = False
 
@@ -49,33 +51,33 @@ def _get_sigpy() -> ModuleType | None:
     return _SIGPY
 
 
-def _validate_image(image: np.ndarray) -> np.ndarray:
-    image = np.asarray(image)
+def _validate_image(image: np.ndarray, backend: ArrayBackend) -> np.ndarray:
+    image = backend.to_device(image)
     assert image.ndim == 2, f"image must be 2D, got shape {image.shape}"
     assert all(size > 0 for size in image.shape), f"image shape must be positive, got {image.shape}"
-    assert np.iscomplexobj(image), "image must be complex-valued"
-    assert np.all(np.isfinite(image)), "image contains non-finite values"
+    assert image.dtype.kind == "c", "image must be complex-valued"
+    assert backend.all_finite(image), "image contains non-finite values"
     return image
 
 
-def _validate_coord(coord: np.ndarray) -> np.ndarray:
-    coord = np.asarray(coord)
+def _validate_coord(coord: np.ndarray, backend: ArrayBackend) -> np.ndarray:
+    coord = backend.to_device(coord)
     assert coord.ndim == 2, f"coord must have shape (n_samples, 2), got {coord.shape}"
     assert coord.shape[1] == 2, f"coord last dimension must be 2, got {coord.shape}"
     assert coord.shape[0] > 0, "coord must contain at least one k-space sample"
     assert np.issubdtype(coord.dtype, np.floating), "coord must be floating-point"
-    assert np.all(np.isfinite(coord)), "coord contains non-finite values"
+    assert backend.all_finite(coord), "coord contains non-finite values"
     return coord
 
 
-def _validate_kspace(kspace: np.ndarray, coord: np.ndarray) -> np.ndarray:
-    kspace = np.asarray(kspace)
+def _validate_kspace(kspace: np.ndarray, coord: np.ndarray, backend: ArrayBackend) -> np.ndarray:
+    kspace = backend.to_device(kspace)
     assert kspace.ndim == 1, f"kspace must have shape (n_samples,), got {kspace.shape}"
     assert kspace.shape[0] == coord.shape[0], (
         f"kspace samples ({kspace.shape[0]}) must match coord samples ({coord.shape[0]})"
     )
-    assert np.iscomplexobj(kspace), "kspace must be complex-valued"
-    assert np.all(np.isfinite(kspace)), "kspace contains non-finite values"
+    assert kspace.dtype.kind == "c", "kspace must be complex-valued"
+    assert backend.all_finite(kspace), "kspace contains non-finite values"
     return kspace
 
 
@@ -86,58 +88,97 @@ def _validate_img_shape(img_shape: Sequence[int]) -> tuple[int, int]:
     return shape
 
 
-def nufft_forward(image: np.ndarray, coord: np.ndarray) -> np.ndarray:
+def _run_sigpy_nufft_forward(sp: ModuleType, image: np.ndarray, coord: np.ndarray, backend: ArrayBackend) -> np.ndarray:
+    if not backend.is_cuda:
+        return sp.nufft(image, coord)
+    with sp.Device(backend.device_id):
+        return sp.nufft(image, coord)
+
+
+def _run_sigpy_nufft_adjoint(
+    sp: ModuleType,
+    kspace: np.ndarray,
+    coord: np.ndarray,
+    shape: tuple[int, int],
+    backend: ArrayBackend,
+) -> np.ndarray:
+    if not backend.is_cuda:
+        return sp.nufft_adjoint(kspace, coord, oshape=shape)
+    with sp.Device(backend.device_id):
+        return sp.nufft_adjoint(kspace, coord, oshape=shape)
+
+
+def nufft_forward(image: np.ndarray, coord: np.ndarray, device: str = "cpu", device_id: int = 0) -> np.ndarray:
     """Apply the 2D NUFFT forward operator."""
 
-    image = _validate_image(image)
-    coord = _validate_coord(coord)
+    backend = get_array_backend(device, device_id)
+    image = _validate_image(image, backend)
+    coord = _validate_coord(coord, backend)
     sp = _get_sigpy()
 
     if sp is None:
-        kspace = _direct_nudft_forward(image, coord)
+        if backend.is_cuda:
+            raise RuntimeError("CUDA NUFFT requires SigPy. Install sigpy together with CuPy to use --device cuda.")
+        kspace = _direct_nudft_forward(image, coord, backend)
     else:
-        kspace = sp.nufft(image, coord)
+        kspace = _run_sigpy_nufft_forward(sp, image, coord, backend)
     assert kspace.shape == (coord.shape[0],), (
         f"NUFFT forward returned shape {kspace.shape}, expected {(coord.shape[0],)}"
     )
-    return np.asarray(kspace)
+    return kspace if backend.is_cuda else np.asarray(kspace)
 
 
-def nufft_adjoint(kspace: np.ndarray, coord: np.ndarray, img_shape: Sequence[int]) -> np.ndarray:
+def nufft_adjoint(
+    kspace: np.ndarray,
+    coord: np.ndarray,
+    img_shape: Sequence[int],
+    device: str = "cpu",
+    device_id: int = 0,
+) -> np.ndarray:
     """Apply the 2D NUFFT adjoint operator."""
 
-    coord = _validate_coord(coord)
-    kspace = _validate_kspace(kspace, coord)
+    backend = get_array_backend(device, device_id)
+    coord = _validate_coord(coord, backend)
+    kspace = _validate_kspace(kspace, coord, backend)
     shape = _validate_img_shape(img_shape)
     sp = _get_sigpy()
 
     if sp is None:
-        image = _direct_nudft_adjoint(kspace, coord, shape)
+        if backend.is_cuda:
+            raise RuntimeError("CUDA NUFFT requires SigPy. Install sigpy together with CuPy to use --device cuda.")
+        image = _direct_nudft_adjoint(kspace, coord, shape, backend)
     else:
-        image = sp.nufft_adjoint(kspace, coord, oshape=shape)
+        image = _run_sigpy_nufft_adjoint(sp, kspace, coord, shape, backend)
     assert image.shape == shape, f"NUFFT adjoint returned shape {image.shape}, expected {shape}"
-    return np.asarray(image)
+    return image if backend.is_cuda else np.asarray(image)
 
 
-def _direct_nudft_forward(image: np.ndarray, coord: np.ndarray) -> np.ndarray:
+def _direct_nudft_forward(image: np.ndarray, coord: np.ndarray, backend: ArrayBackend) -> np.ndarray:
     """Small-array direct non-uniform DFT fallback used when SigPy is unavailable."""
 
+    xp = backend.xp
     height, width = image.shape
-    y = np.arange(height, dtype=np.float32) - height / 2.0
-    x = np.arange(width, dtype=np.float32) - width / 2.0
-    yy, xx = np.meshgrid(y, x, indexing="ij")
-    points = np.stack([yy.ravel() / height, xx.ravel() / width], axis=1)
-    phase = -2j * np.pi * (coord @ points.T)
-    return np.exp(phase) @ image.ravel()
+    y = xp.arange(height, dtype=xp.float32) - height / 2.0
+    x = xp.arange(width, dtype=xp.float32) - width / 2.0
+    yy, xx = xp.meshgrid(y, x, indexing="ij")
+    points = xp.stack([yy.ravel() / height, xx.ravel() / width], axis=1)
+    phase = -2j * xp.pi * (coord @ points.T)
+    return xp.exp(phase) @ image.ravel()
 
 
-def _direct_nudft_adjoint(kspace: np.ndarray, coord: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+def _direct_nudft_adjoint(
+    kspace: np.ndarray,
+    coord: np.ndarray,
+    shape: tuple[int, int],
+    backend: ArrayBackend,
+) -> np.ndarray:
     """Adjoint of the direct non-uniform DFT fallback."""
 
+    xp = backend.xp
     height, width = shape
-    y = np.arange(height, dtype=np.float32) - height / 2.0
-    x = np.arange(width, dtype=np.float32) - width / 2.0
-    yy, xx = np.meshgrid(y, x, indexing="ij")
-    points = np.stack([yy.ravel() / height, xx.ravel() / width], axis=1)
-    phase = 2j * np.pi * (coord @ points.T)
-    return (np.exp(phase).T @ kspace).reshape(shape)
+    y = xp.arange(height, dtype=xp.float32) - height / 2.0
+    x = xp.arange(width, dtype=xp.float32) - width / 2.0
+    yy, xx = xp.meshgrid(y, x, indexing="ij")
+    points = xp.stack([yy.ravel() / height, xx.ravel() / width], axis=1)
+    phase = 2j * xp.pi * (coord @ points.T)
+    return (xp.exp(phase).T @ kspace).reshape(shape)
