@@ -103,6 +103,13 @@ def reconstruct_subspace_gd(
         backend,
     )
 
+    # ==========================================
+    # 【方案一核心修改：输入端 K 空间全局归一化】
+    # ==========================================
+    kspace_max = float(backend.scalar_to_python(xp.max(xp.abs(kspace))))
+    if kspace_max > 0:
+        kspace = kspace / kspace_max
+
     if sens_maps is None:
         adjoint = subspace_nufft_adjoint
         forward = subspace_nufft_forward
@@ -138,7 +145,9 @@ def reconstruct_subspace_gd(
             )
         residual = pred - kspace
         loss = float(backend.scalar_to_python(0.5 * xp.vdot(residual, residual).real))
-        losses.append(loss)
+        
+        # 还原损失函数的尺度，保证终端输出的物理真实性
+        losses.append(loss * (kspace_max ** 2))
 
         if sens_maps is None:
             grad = adjoint(residual, basis, coord, shape, device=device, device_id=device_id)
@@ -154,6 +163,12 @@ def reconstruct_subspace_gd(
             )
         coeff_maps = coeff_maps - step_size * grad.astype(coeff_maps.dtype, copy=False)
         assert backend.all_finite(coeff_maps), "coeff_maps contains non-finite values"
+
+    # ==========================================
+    # 【方案一核心修改：输出端完美还原绝对物理尺度】
+    # ==========================================
+    if kspace_max > 0:
+        coeff_maps = coeff_maps * kspace_max
 
     return backend.to_cpu(coeff_maps), losses
 
@@ -189,6 +204,13 @@ def reconstruct_subspace_llr(
         sens_maps,
         backend,
     )
+
+    # ==========================================
+    # 【方案一核心修改：输入端 K 空间全局归一化】
+    # ==========================================
+    kspace_max = float(backend.scalar_to_python(xp.max(xp.abs(kspace))))
+    if kspace_max > 0:
+        kspace = kspace / kspace_max
 
     if sens_maps is None:
         coeff_maps = subspace_nufft_adjoint(kspace, basis, coord, shape, device=device, device_id=device_id)
@@ -240,6 +262,8 @@ def reconstruct_subspace_llr(
             )
 
         gradient_step = momentum_maps - step_size * grad.astype(momentum_maps.dtype, copy=False)
+        
+        # 此时传入的 threshold(step_size * lambda_llr) 将完美在 [0, 1] 尺度的奇异值上生效
         next_coeff_maps = llr_soft_threshold(
             gradient_step.astype(result_dtype, copy=False),
             patch_shape=patch_shape,
@@ -268,7 +292,9 @@ def reconstruct_subspace_llr(
             device=device,
             device_id=device_id,
         )
-        losses.append(float(data_loss + reg_loss))
+        
+        # 还原损失函数的真实尺度，确保 log 打印输出的一致性
+        losses.append(float((data_loss + reg_loss) * (kspace_max ** 2)))
 
         next_fista_t = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * fista_t * fista_t))
         momentum = (fista_t - 1.0) / next_fista_t
@@ -278,5 +304,11 @@ def reconstruct_subspace_llr(
 
         assert backend.all_finite(coeff_maps), "coeff_maps contains non-finite values"
         assert backend.all_finite(momentum_maps), "momentum_maps contains non-finite values"
+
+    # ==========================================
+    # 【方案一核心修改：输出端完美还原绝对物理尺度】
+    # ==========================================
+    if kspace_max > 0:
+        coeff_maps = coeff_maps * kspace_max
 
     return backend.to_cpu(coeff_maps), losses
