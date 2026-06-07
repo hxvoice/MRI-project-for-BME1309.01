@@ -15,6 +15,10 @@ def main() -> None:
     output_dir = Path("data/processed")
     prepare_phantom(
         shape=config.IMG_SHAPE,
+        brain_radius=config.PHANTOM_BRAIN_RADIUS,
+        wm_radius=config.PHANTOM_WM_RADIUS,
+        csf_radius=config.PHANTOM_CSF_RADIUS,
+        tissue_values=config.PHANTOM_TISSUES,
         save_path=output_dir / "brain_param_map_2d.npy",
         figure_path=output_dir / "simulated_brain_phantom.png",
     )

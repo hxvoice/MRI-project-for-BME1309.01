@@ -85,6 +85,11 @@ def main() -> None:
         img_shape,
         center_width=args.center_width,
         calib_width=args.calib_width,
+        thresh=config.ESPIRIT_THRESH,
+        kernel_width=config.ESPIRIT_KERNEL_WIDTH,
+        crop=config.ESPIRIT_CROP,
+        max_iter=config.ESPIRIT_MAX_ITER,
+        show_pbar=config.ESPIRIT_SHOW_PBAR,
     )
     print(f"[Sens] 敏感度图维度: {sens_maps.shape}")
 

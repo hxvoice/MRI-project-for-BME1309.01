@@ -2,14 +2,73 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Sequence
+import copy
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any
 
 import numpy as np
 
 import pipeline_config as config
+
+
+FINGERPRINT_PATH = Path("data/processed/pipeline_config_fingerprint.json")
+
+TRAJECTORY_CONFIG_KEYS = (
+    "N_TR",
+    "IMG_SHAPE",
+    "SPIRAL_FOV",
+    "SPIRAL_RES",
+    "SPIRAL_READOUT_TIME",
+    "SPIRAL_UNDERSAMPLE_CENTER",
+    "SPIRAL_UNDERSAMPLE_EDGE",
+    "SPIRAL_ADC_RATE",
+    "TINY_GOLDEN_ANGLE",
+)
+PHANTOM_CONFIG_KEYS = (
+    "IMG_SHAPE",
+    "PHANTOM_BRAIN_RADIUS",
+    "PHANTOM_WM_RADIUS",
+    "PHANTOM_CSF_RADIUS",
+    "PHANTOM_TISSUES",
+)
+DICTIONARY_CONFIG_KEYS = (
+    "N_TR",
+    "SUBSPACE_RANK",
+    "EPG_NUM_STATES",
+    "EPG_TR",
+    "EPG_TE",
+    "EPG_TI",
+    "FA_MIN",
+    "FA_MAX",
+    "FA_NUM_ANCHORS",
+    "FA_RANDOM_SEED",
+    "T1_GRID_RANGES",
+    "T2_GRID_RANGES",
+)
+FORWARD_CONFIG_KEYS = (
+    "N_COILS",
+    "NOISE_LEVEL",
+    "RANDOM_SEED",
+)
+RECON_CONFIG_KEYS = (
+    "N_ITER",
+    "LAMBDA_LLR",
+    "STEP_SIZE",
+    "PATCH_SHAPE",
+    "CENTER_WIDTH",
+    "CALIB_WIDTH",
+    "SUBSPACE_RANK",
+    "ESPIRIT_THRESH",
+    "ESPIRIT_KERNEL_WIDTH",
+    "ESPIRIT_CROP",
+    "ESPIRIT_MAX_ITER",
+    "ESPIRIT_SHOW_PBAR",
+)
+MATCHING_CONFIG_KEYS = ("SUBSPACE_RANK",)
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,6 +110,63 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--calib-width", type=int, default=config.CALIB_WIDTH, help="ESPIRiT calibration width.")
     return parser.parse_args()
+
+
+def normalize_for_json(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, dict):
+        return {str(key): normalize_for_json(value[key]) for key in sorted(value)}
+    if isinstance(value, (list, tuple)):
+        return [normalize_for_json(item) for item in value]
+    return value
+
+
+def selected_config(keys: Sequence[str]) -> dict[str, Any]:
+    return {key: normalize_for_json(getattr(config, key)) for key in keys}
+
+
+def config_diff(old: dict[str, Any] | None, new: dict[str, Any]) -> list[str]:
+    if old is None:
+        return sorted(new)
+    changed = sorted(key for key, value in new.items() if old.get(key) != value)
+    removed = sorted(key for key in old if key not in new)
+    return [*changed, *removed]
+
+
+def load_fingerprint(project_root: Path) -> dict[str, Any]:
+    path = project_root / FINGERPRINT_PATH
+    if not path.exists():
+        return {"steps": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"Will refresh config fingerprint: could not read {FINGERPRINT_PATH}: {error}")
+        return {"steps": {}}
+    if not isinstance(data, dict) or not isinstance(data.get("steps"), dict):
+        print(f"Will refresh config fingerprint: {FINGERPRINT_PATH} has an unexpected format.")
+        return {"steps": {}}
+    return data
+
+
+def save_fingerprint(project_root: Path, fingerprint: dict[str, Any]) -> None:
+    path = project_root / FINGERPRINT_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(fingerprint, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def print_config_summary(step_configs: dict[str, dict[str, Any]]) -> None:
+    print("\n[Config] Current key parameters")
+    summary = {
+        "image": selected_config(("IMG_SHAPE", "N_TR", "SUBSPACE_RANK", "N_COILS")),
+        "recon": selected_config(("N_ITER", "LAMBDA_LLR", "STEP_SIZE", "PATCH_SHAPE")),
+        "trajectory": selected_config(("SPIRAL_READOUT_TIME", "SPIRAL_ADC_RATE", "TINY_GOLDEN_ANGLE")),
+        "noise": selected_config(("NOISE_LEVEL", "RANDOM_SEED")),
+    }
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    print(f"[Config] Tracking fingerprints for {len(step_configs)} pipeline steps.")
 
 
 def npy_shape_is(expected_shape: tuple[int, ...]) -> Callable[[Path], bool]:
@@ -98,6 +214,7 @@ def outputs_are_valid(project_root: Path, checks: Sequence[tuple[Path, Callable[
     for output, check in checks:
         output_path = project_root / output
         if not output_path.exists():
+            print(f"Will rerun: {output} is missing.")
             return False
         try:
             if not check(output_path):
@@ -126,9 +243,25 @@ def outputs_are_current(project_root: Path, outputs: Sequence[Path], inputs: Seq
     return True
 
 
+def step_config_is_current(
+    fingerprint: dict[str, Any],
+    step_id: str,
+    current_config: dict[str, Any],
+) -> bool:
+    saved_config = fingerprint.get("steps", {}).get(step_id)
+    changed_keys = config_diff(saved_config, current_config)
+    if changed_keys:
+        print(f"Will rerun: config changed for {step_id}: {', '.join(changed_keys)}.")
+        return False
+    return True
+
+
 def run_step(
     project_root: Path,
     env: dict[str, str],
+    fingerprint: dict[str, Any],
+    step_id: str,
+    step_config: dict[str, Any],
     label: str,
     script: str,
     args: Sequence[str] = (),
@@ -144,8 +277,9 @@ def run_step(
         and all(output.exists() for output in output_paths)
         and outputs_are_valid(project_root, output_checks)
         and outputs_are_current(project_root, outputs, inputs)
+        and step_config_is_current(fingerprint, step_id, step_config)
     ):
-        print("Skip: output file(s) already exist.")
+        print("Skip: output file(s) already exist, are valid, and config is unchanged.")
         for output in output_paths:
             print(f"  {output.relative_to(project_root)}")
         return
@@ -153,6 +287,8 @@ def run_step(
     command = [sys.executable, script, *args]
     print(" ".join(command))
     subprocess.run(command, cwd=project_root, env=env, check=True)
+    fingerprint.setdefault("steps", {})[step_id] = copy.deepcopy(step_config)
+    save_fingerprint(project_root, fingerprint)
 
 
 def main() -> None:
@@ -187,10 +323,45 @@ def main() -> None:
         str(args.gpu_device),
     ]
 
+    step_configs = {
+        "trajectory": selected_config(TRAJECTORY_CONFIG_KEYS),
+        "phantom": selected_config(PHANTOM_CONFIG_KEYS),
+        "dictionary": {
+            **selected_config(DICTIONARY_CONFIG_KEYS),
+            "device": args.device,
+            "gpu_device": args.gpu_device,
+            "dictionary_batch_size": args.dictionary_batch_size,
+        },
+        "forward": selected_config(FORWARD_CONFIG_KEYS),
+        "recon": {
+            **selected_config(RECON_CONFIG_KEYS),
+            "n_iter": args.n_iter,
+            "lambda_llr": args.lambda_llr,
+            "step_size": args.step_size,
+            "img_shape": normalize_for_json(args.img_shape),
+            "patch_shape": normalize_for_json(args.patch_shape),
+            "center_width": args.center_width,
+            "calib_width": args.calib_width,
+            "device": args.device,
+            "gpu_device": args.gpu_device,
+        },
+        "matching": {
+            **selected_config(MATCHING_CONFIG_KEYS),
+            "device": args.device,
+            "gpu_device": args.gpu_device,
+            "matching_batch_size": args.matching_batch_size,
+        },
+    }
+    fingerprint = load_fingerprint(project_root)
+
     print(">>> Starting full 2D MRF pipeline <<<")
+    print_config_summary(step_configs)
     run_step(
         project_root,
         env,
+        fingerprint,
+        "trajectory",
+        step_configs["trajectory"],
         "1/6 Generate trajectory",
         "scripts/generate_traj.py",
         outputs=[
@@ -204,6 +375,9 @@ def main() -> None:
     run_step(
         project_root,
         env,
+        fingerprint,
+        "phantom",
+        step_configs["phantom"],
         "2/6 Prepare phantom",
         "scripts/prepare_phantom.py",
         outputs=[
@@ -217,6 +391,9 @@ def main() -> None:
     run_step(
         project_root,
         env,
+        fingerprint,
+        "dictionary",
+        step_configs["dictionary"],
         "3/6 Build dictionary",
         "scripts/build_dictionary.py",
         args=[
@@ -238,6 +415,9 @@ def main() -> None:
     run_step(
         project_root,
         env,
+        fingerprint,
+        "forward",
+        step_configs["forward"],
         "4/6 Forward simulation",
         "scripts/run_forward_sim.py",
         inputs=[
@@ -253,6 +433,9 @@ def main() -> None:
     run_step(
         project_root,
         env,
+        fingerprint,
+        "recon",
+        step_configs["recon"],
         "5/6 Subspace LLR reconstruction",
         "scripts/run_recon.py",
         args=recon_args,
@@ -269,6 +452,9 @@ def main() -> None:
     run_step(
         project_root,
         env,
+        fingerprint,
+        "matching",
+        step_configs["matching"],
         "6/6 Template matching and plotting",
         "scripts/template_matching.py",
         args=[
@@ -284,6 +470,11 @@ def main() -> None:
                 else []
             ),
         ],
+        inputs=[
+            Path("data/output/reconstructed_coeff_maps.npy"),
+            Path("data/processed/mrf_dictionary_data.npz"),
+        ],
+        outputs=[Path("data/output/quantitative_maps.png")],
     )
     print("\n>>> Full 2D MRF pipeline finished <<<")
 

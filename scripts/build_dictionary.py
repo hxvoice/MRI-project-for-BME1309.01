@@ -39,11 +39,22 @@ def main() -> None:
     output_dir = Path("data/processed")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    fa_train = generate_mrf_fa_train_spline(num_trs=config.N_TR)
+    fa_train = generate_mrf_fa_train_spline(
+        num_trs=config.N_TR,
+        min_fa=config.FA_MIN,
+        max_fa=config.FA_MAX,
+        num_anchors=config.FA_NUM_ANCHORS,
+        seed=config.FA_RANDOM_SEED,
+    )
     simulator = MRFEPGSimulator(num_states=config.EPG_NUM_STATES)
     signal_dict, t1_grid, t2_grid = build_signal_dictionary(
         simulator,
         fa_train,
+        t1_grid=config.t1_grid(),
+        t2_grid=config.t2_grid(),
+        tr=config.EPG_TR,
+        te=config.EPG_TE,
+        ti=config.EPG_TI,
         device=args.device,
         device_id=args.gpu_device,
         batch_size=args.dictionary_batch_size,

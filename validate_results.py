@@ -9,8 +9,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+import pipeline_config as config
 from mri_project.quantification import execute_template_matching
 
 
@@ -22,9 +24,9 @@ class Tissue:
 
 
 TISSUES = (
-    Tissue("WM", 850.0, 60.0),
-    Tissue("GM", 1350.0, 80.0),
-    Tissue("CSF", 4000.0, 2000.0),
+    Tissue("WM", config.PHANTOM_TISSUES["wm"]["t1"], config.PHANTOM_TISSUES["wm"]["t2"]),
+    Tissue("GM", config.PHANTOM_TISSUES["gm"]["t1"], config.PHANTOM_TISSUES["gm"]["t2"]),
+    Tissue("CSF", config.PHANTOM_TISSUES["csf"]["t1"], config.PHANTOM_TISSUES["csf"]["t2"]),
 )
 
 

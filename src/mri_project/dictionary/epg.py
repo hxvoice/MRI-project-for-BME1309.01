@@ -236,6 +236,9 @@ def build_signal_dictionary(
     fa_train: np.ndarray,
     t1_grid: np.ndarray | None = None,
     t2_grid: np.ndarray | None = None,
+    tr: float = 12.0,
+    te: float = 0.7,
+    ti: float = 20.0,
     device: str = "cpu",
     device_id: int = 0,
     batch_size: int | None = None,
@@ -250,6 +253,8 @@ def build_signal_dictionary(
     assert fa_train.ndim == 1 and fa_train.size > 0, "fa_train must be a non-empty 1D array"
     assert t1_values.ndim == 1 and t1_values.size > 0, "t1_grid must be a non-empty 1D array"
     assert t2_values.ndim == 1 and t2_values.size > 0, "t2_grid must be a non-empty 1D array"
+    assert tr > te >= 0, "TR must be greater than TE"
+    assert ti >= 0, "TI must be non-negative"
     assert batch_size is None or batch_size > 0, "batch_size must be positive when provided"
 
     backend = get_array_backend(device, device_id)
@@ -261,7 +266,14 @@ def build_signal_dictionary(
         for t1_index, t1 in enumerate(t1_values):
             for t2_index, t2 in enumerate(t2_values):
                 if t2 <= t1:
-                    dictionary[t1_index, t2_index] = simulator.simulate_mrf_fisp(t1=t1, t2=t2, fa_train=fa_train)
+                    dictionary[t1_index, t2_index] = simulator.simulate_mrf_fisp(
+                        t1=t1,
+                        t2=t2,
+                        fa_train=fa_train,
+                        tr=tr,
+                        te=te,
+                        ti=ti,
+                    )
     elif valid_count > 0:
         chunk_size = valid_count if batch_size is None else batch_size
         for start in range(0, valid_count, chunk_size):
@@ -273,6 +285,9 @@ def build_signal_dictionary(
                 t2_values[batch_t2_indices],
                 fa_train,
                 num_states=simulator.num_states,
+                tr=tr,
+                te=te,
+                ti=ti,
                 device=device,
                 device_id=device_id,
             )
@@ -323,6 +338,9 @@ def build_and_compress_dictionary(
     t1_grid: np.ndarray | None = None,
     t2_grid: np.ndarray | None = None,
     rank: int = 5,
+    tr: float = 12.0,
+    te: float = 0.7,
+    ti: float = 20.0,
     device: str = "cpu",
     device_id: int = 0,
     batch_size: int | None = None,
@@ -334,6 +352,9 @@ def build_and_compress_dictionary(
         fa_train,
         t1_grid,
         t2_grid,
+        tr=tr,
+        te=te,
+        ti=ti,
         device=device,
         device_id=device_id,
         batch_size=batch_size,
