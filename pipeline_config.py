@@ -1,12 +1,12 @@
 """Central default settings for the lightweight MRF pipeline."""
 
-IMG_SHAPE = (96, 96)
-N_COILS = 4
+IMG_SHAPE = (220, 220)
+N_COILS = 8
 N_TR = 500
 SUBSPACE_RANK = 5
 
-N_ITER = 2
-LAMBDA_LLR = 1e-4
+N_ITER = 30
+LAMBDA_LLR = 1e-9
 STEP_SIZE = 1e-3
 PATCH_SHAPE = (8, 8)
 CENTER_WIDTH = 24

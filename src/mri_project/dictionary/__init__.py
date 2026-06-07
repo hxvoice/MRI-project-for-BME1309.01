@@ -6,6 +6,7 @@ from .epg import (
     build_signal_dictionary,
     compress_dictionary,
     generate_mrf_fa_train_spline,
+    simulate_mrf_fisp_batch,
 )
 
 MRF_EPG_Simulator = MRFEPGSimulator
@@ -17,4 +18,5 @@ __all__ = [
     "compress_dictionary",
     "build_and_compress_dictionary",
     "generate_mrf_fa_train_spline",
+    "simulate_mrf_fisp_batch",
 ]

@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from mri_project.array_backend import get_array_backend
+from mri_project.dictionary import MRFEPGSimulator, build_signal_dictionary, compress_dictionary
 from mri_project.quantification import execute_template_matching
 from mri_project.recon.regularization import llr_soft_threshold
 
@@ -81,3 +82,33 @@ def test_llr_gpu_matches_cpu_when_available():
     gpu_result = llr_soft_threshold(coeff_maps, patch_shape=(2, 2), threshold=0.01, device="cuda")
 
     np.testing.assert_allclose(gpu_result, cpu_result, rtol=1e-5, atol=1e-6)
+
+
+def test_dictionary_gpu_matches_cpu_when_available():
+    get_cuda_backend_or_skip()
+
+    simulator = MRFEPGSimulator(num_states=12)
+    fa_train = np.linspace(10.0, 45.0, 8, dtype=np.float32)
+    t1_grid = np.array([80.0, 200.0, 500.0], dtype=np.float32)
+    t2_grid = np.array([40.0, 120.0, 600.0], dtype=np.float32)
+
+    cpu_dict, returned_t1, returned_t2 = build_signal_dictionary(simulator, fa_train, t1_grid, t2_grid)
+    gpu_dict, gpu_t1, gpu_t2 = build_signal_dictionary(
+        simulator,
+        fa_train,
+        t1_grid,
+        t2_grid,
+        device="cuda",
+        batch_size=2,
+    )
+
+    np.testing.assert_array_equal(gpu_t1, returned_t1)
+    np.testing.assert_array_equal(gpu_t2, returned_t2)
+    np.testing.assert_allclose(gpu_dict, cpu_dict, rtol=1e-5, atol=1e-6)
+
+    cpu_compressed, cpu_bases = compress_dictionary(cpu_dict, rank=2)
+    gpu_compressed, gpu_bases = compress_dictionary(gpu_dict, rank=2, device="cuda")
+    cpu_reconstruction = cpu_compressed.reshape(-1, 2) @ cpu_bases
+    gpu_reconstruction = gpu_compressed.reshape(-1, 2) @ gpu_bases
+
+    np.testing.assert_allclose(gpu_reconstruction, cpu_reconstruction, rtol=1e-5, atol=1e-6)

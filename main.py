@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
         help="Pixels per template-matching similarity batch. Uses the full image when omitted.",
     )
     parser.add_argument(
+        "--dictionary-batch-size",
+        type=int,
+        default=None,
+        help="Valid dictionary entries per GPU batch. Uses all valid entries when omitted.",
+    )
+    parser.add_argument(
         "--center-width",
         type=int,
         default=config.CENTER_WIDTH,
@@ -156,6 +162,7 @@ def main() -> None:
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("NUMBA_CACHE_DIR", str(project_root / ".numba_cache"))
+    env.setdefault("CUPY_CACHE_DIR", str(project_root / ".cupy_cache"))
 
     recon_args = [
         "--n-iter",
@@ -212,6 +219,17 @@ def main() -> None:
         env,
         "3/6 Build dictionary",
         "scripts/build_dictionary.py",
+        args=[
+            "--device",
+            args.device,
+            "--gpu-device",
+            str(args.gpu_device),
+            *(
+                ["--dictionary-batch-size", str(args.dictionary_batch_size)]
+                if args.dictionary_batch_size is not None
+                else []
+            ),
+        ],
         outputs=[Path("data/processed/mrf_dictionary_data.npz")],
         output_checks=[
             (Path("data/processed/mrf_dictionary_data.npz"), dictionary_matches_config),

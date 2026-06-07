@@ -246,6 +246,7 @@ def reconstruct_subspace_llr(
             threshold=step_size * lambda_llr,
             device=device,
             device_id=device_id,
+            return_cpu=False,
         ).astype(result_dtype, copy=False)
 
         if sens_maps is None:

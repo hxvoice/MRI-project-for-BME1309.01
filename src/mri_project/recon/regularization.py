@@ -43,6 +43,7 @@ def llr_soft_threshold(
     threshold: float = 0.0,
     device: str = "cpu",
     device_id: int = 0,
+    return_cpu: bool = True,
 ) -> np.ndarray:
     """Apply non-overlapping local low-rank singular-value soft-thresholding."""
 
@@ -55,10 +56,11 @@ def llr_soft_threshold(
     assert np.isfinite(threshold), "threshold must be finite"
 
     if threshold == 0.0:
-        return coeff_maps.copy()
+        denoised = coeff_maps.copy()
+        return backend.to_cpu(denoised) if return_cpu else denoised
 
     rank, height, width = coeff_maps.shape
-    denoised = np.empty_like(coeff_maps)
+    denoised = xp.empty_like(coeff_maps)
     for y_slice, x_slice in _iter_patch_slices(height, width, patch_shape):
         patch = coeff_maps[:, y_slice, x_slice]
         matrix = patch.reshape(rank, -1)
@@ -71,7 +73,7 @@ def llr_soft_threshold(
     )
     assert denoised.dtype.kind == "c", "llr_soft_threshold returned a non-complex array"
     assert backend.all_finite(denoised), "llr_soft_threshold returned non-finite values"
-    return denoised
+    return backend.to_cpu(denoised) if return_cpu else denoised
 
 
 def llr_nuclear_norm(
