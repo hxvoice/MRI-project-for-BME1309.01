@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import pipeline_config as config
-from mri_project.quantification import execute_template_matching
+from mri_project.quantification import match_dictionary_indices
 
 
 @dataclass(frozen=True)
@@ -53,8 +53,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reference-png",
         type=Path,
-        default=Path("data/processed/simulated_brain_phantom.png"),
-        help="Pre-generated PNG used as the visual reference.",
+        default=None,
+        help=(
+            "Pre-generated PNG used as the visual reference. When omitted, "
+            "uses the DICOM preview for a DICOM-derived phantom and the "
+            "simulated phantom preview for the mathematical phantom."
+        ),
     )
     parser.add_argument(
         "--generated-png",
@@ -86,21 +90,93 @@ def nearest_grid_value(grid: np.ndarray, value: float) -> float:
     return float(grid[int(np.argmin(np.abs(grid - value)))])
 
 
+def phantom_matches_mathematical_defaults(phantom: np.ndarray) -> bool:
+    """Return True when the current phantom appears to be the original mathematical phantom."""
+
+    foreground = phantom[..., 2] > 0
+    if not np.any(foreground):
+        return False
+
+    expected = np.array(
+        [
+            (
+                float(values["t1"]),
+                float(values["t2"]),
+                float(values["pd"]),
+            )
+            for values in config.PHANTOM_TISSUES.values()
+        ],
+        dtype=np.float32,
+    )
+    actual = np.unique(np.asarray(phantom[foreground]), axis=0)
+    if actual.shape != expected.shape:
+        return False
+
+    actual = actual[np.lexsort((actual[:, 2], actual[:, 1], actual[:, 0]))]
+    expected = expected[np.lexsort((expected[:, 2], expected[:, 1], expected[:, 0]))]
+    return bool(np.allclose(actual, expected, rtol=0.0, atol=1e-4))
+
+
+def default_reference_png_for_phantom(phantom: np.ndarray) -> Path:
+    if phantom_matches_mathematical_defaults(phantom):
+        return PROJECT_ROOT / "data" / "processed" / "simulated_brain_phantom.png"
+    return PROJECT_ROOT / "data" / "processed" / "dicom_phantom_preview.png"
+
+
+def reference_tissues_from_phantom(phantom: np.ndarray) -> list[Tissue]:
+    """Return discrete foreground T1/T2 pairs found in the current phantom."""
+
+    foreground = phantom[..., 2] > 0
+    if not np.any(foreground):
+        return []
+
+    pairs = np.unique(phantom[foreground][..., :2], axis=0)
+    tissues: list[Tissue] = []
+    for pair in pairs:
+        t1 = float(pair[0])
+        t2 = float(pair[1])
+        name = next((tissue.name for tissue in TISSUES if tissue.t1 == t1 and tissue.t2 == t2), None)
+        if name is None:
+            name = f"Tissue{len(tissues) + 1}"
+        tissues.append(Tissue(name, t1, t2))
+    return tissues
+
+
 def load_matching_results(
     dictionary_path: Path,
     coeff_maps_path: Path,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, tuple[int, int]]:
     dictionary_data = np.load(dictionary_path)
     coeff_maps = np.load(coeff_maps_path)
     t1_grid = dictionary_data["t1"]
     t2_grid = dictionary_data["t2"]
-    t1_map, t2_map, pd_map = execute_template_matching(
+    dict_compressed = dictionary_data["compressed_dict"]
+    pred_idx_flat, pd_map = match_dictionary_indices(
         coeff_maps,
-        dictionary_data["compressed_dict"],
-        t1_grid,
-        t2_grid,
+        dict_compressed,
     )
-    return t1_map, t2_map, pd_map, t1_grid, t2_grid
+    pred_idx = pred_idx_flat.reshape(coeff_maps.shape[:2])
+    idx_t1, idx_t2 = np.unravel_index(pred_idx_flat, dict_compressed.shape[:2])
+    t1_map = t1_grid[idx_t1].reshape(coeff_maps.shape[:2])
+    t2_map = t2_grid[idx_t2].reshape(coeff_maps.shape[:2])
+    return t1_map, t2_map, pd_map, t1_grid, t2_grid, pred_idx, dict_compressed.shape[:2]
+
+
+def apply_foreground_mask(
+    t1_map: np.ndarray,
+    t2_map: np.ndarray,
+    pd_map: np.ndarray,
+    phantom: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Zero quantitative maps outside the phantom foreground."""
+
+    foreground = phantom[..., 2] > 0
+    return (
+        np.where(foreground, t1_map, 0.0),
+        np.where(foreground, t2_map, 0.0),
+        np.where(foreground, pd_map, 0.0),
+        foreground,
+    )
 
 
 def render_quantitative_maps(
@@ -108,24 +184,50 @@ def render_quantitative_maps(
     t2_map: np.ndarray,
     pd_map: np.ndarray,
     save_path: Path,
+    foreground: np.ndarray,
 ) -> None:
+    def foreground_vmax(image: np.ndarray, minimum: float) -> float:
+        values = np.asarray(image)[foreground]
+        values = values[np.isfinite(values)]
+        if values.size == 0:
+            return minimum
+        return max(minimum, float(np.max(values)))
+
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5), constrained_layout=True)
 
-    im1 = axes[0].imshow(t1_map, cmap="magma", vmin=0, vmax=2000)
+    t1_cmap = plt.get_cmap("magma").copy()
+    t2_cmap = plt.get_cmap("viridis").copy()
+    pd_cmap = plt.get_cmap("bone").copy()
+    for cmap in (t1_cmap, t2_cmap, pd_cmap):
+        cmap.set_bad("black")
+
+    masked_t1 = np.ma.masked_where(~foreground, t1_map)
+    masked_t2 = np.ma.masked_where(~foreground, t2_map)
+    masked_pd = np.ma.masked_where(~foreground, pd_map)
+
+    im1 = axes[0].imshow(masked_t1, cmap=t1_cmap, vmin=0, vmax=foreground_vmax(t1_map, 2000.0))
     axes[0].set_title("T1 Map (ms)")
-    fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
+    axes[0].set_facecolor("black")
+    axes[0].axis("off")
+    cbar1 = fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
+    cbar1.set_label("ms")
 
-    im2 = axes[1].imshow(t2_map, cmap="viridis", vmin=0, vmax=150)
+    im2 = axes[1].imshow(masked_t2, cmap=t2_cmap, vmin=0, vmax=foreground_vmax(t2_map, 150.0))
     axes[1].set_title("T2 Map (ms)")
-    fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
+    axes[1].set_facecolor("black")
+    axes[1].axis("off")
+    cbar2 = fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
+    cbar2.set_label("ms")
 
-    im3 = axes[2].imshow(pd_map, cmap="bone")
+    im3 = axes[2].imshow(masked_pd, cmap=pd_cmap, vmin=0, vmax=foreground_vmax(pd_map, 1.0))
     axes[2].set_title("PD Map (a.u.)")
-    fig.colorbar(im3, ax=axes[2], fraction=0.046, pad=0.04)
+    axes[2].set_facecolor("black")
+    axes[2].axis("off")
+    cbar3 = fig.colorbar(im3, ax=axes[2], fraction=0.046, pad=0.04)
+    cbar3.set_label("a.u.")
 
     fig.suptitle("Current Quantitative Maps", fontsize=16)
-    fig.tight_layout()
     fig.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
@@ -136,6 +238,81 @@ def print_shape_checks(phantom: np.ndarray, t1_map: np.ndarray, t2_map: np.ndarr
     print(f"T1 map:  {t1_map.shape}, finite={np.isfinite(t1_map).all()}")
     print(f"T2 map:  {t2_map.shape}, finite={np.isfinite(t2_map).all()}")
     print(f"PD map:  {pd_map.shape}, finite={np.isfinite(pd_map).all()}")
+
+
+def print_dictionary_debug(
+    phantom: np.ndarray,
+    t1_map: np.ndarray,
+    t2_map: np.ndarray,
+    t1_grid: np.ndarray,
+    t2_grid: np.ndarray,
+    pred_idx: np.ndarray,
+    dictionary_grid_shape: tuple[int, int],
+) -> None:
+    print("\n[Dictionary debug]")
+    print(
+        f"T1 grid: count={t1_grid.size}, min={float(np.min(t1_grid)):.0f}, max={float(np.max(t1_grid)):.0f}, "
+        f"unit=ms"
+    )
+    print(
+        f"T2 grid: count={t2_grid.size}, min={float(np.min(t2_grid)):.0f}, max={float(np.max(t2_grid)):.0f}, "
+        f"unit=ms"
+    )
+
+    idx_t1, idx_t2 = np.unravel_index(pred_idx.ravel(), dictionary_grid_shape)
+    t1_from_idx = t1_grid[idx_t1].reshape(pred_idx.shape)
+    t2_from_idx = t2_grid[idx_t2].reshape(pred_idx.shape)
+    foreground = phantom[..., 2] > 0
+    print(f"T1_map equals dict_T1[pred_idx] inside foreground: {bool(np.array_equal(t1_map[foreground], t1_from_idx[foreground]))}")
+    print(f"T2_map equals dict_T2[pred_idx] inside foreground: {bool(np.array_equal(t2_map[foreground], t2_from_idx[foreground]))}")
+
+    for tissue in reference_tissues_from_phantom(phantom):
+        has_t1 = bool(np.any(t1_grid == tissue.t1))
+        has_t2 = bool(np.any(t2_grid == tissue.t2))
+        has_pair = has_t1 and has_t2
+        unit_hint = "ms-compatible" if tissue.t1 > 10 and tissue.t2 > 1 else "check-units"
+        print(
+            f"{tissue.name}: true=({tissue.t1:.0f}, {tissue.t2:.0f}), "
+            f"exact T1={has_t1}, exact T2={has_t2}, exact pair={has_pair}, {unit_hint}"
+        )
+
+
+def common_predicted_pairs(
+    t1_values: np.ndarray,
+    t2_values: np.ndarray,
+    top_k: int,
+) -> list[tuple[float, float, int]]:
+    if t1_values.size == 0:
+        return []
+    pairs = np.stack([t1_values, t2_values], axis=-1)
+    unique_pairs, counts = np.unique(pairs, axis=0, return_counts=True)
+    order = np.argsort(counts)[::-1][:top_k]
+    return [(float(unique_pairs[index, 0]), float(unique_pairs[index, 1]), int(counts[index])) for index in order]
+
+
+def print_prediction_confusion(
+    phantom: np.ndarray,
+    t1_map: np.ndarray,
+    t2_map: np.ndarray,
+) -> None:
+    print("\n[Prediction confusion]")
+    for tissue in reference_tissues_from_phantom(phantom):
+        mask = (phantom[..., 2] > 0) & (phantom[..., 0] == tissue.t1) & (phantom[..., 1] == tissue.t2)
+        pixels = int(mask.sum())
+        if pixels == 0:
+            continue
+        unique_t1 = np.unique(t1_map[mask])
+        unique_t2 = np.unique(t2_map[mask])
+        print(
+            f"{tissue.name}: pixels={pixels}, unique predicted T1={unique_t1.size}, "
+            f"unique predicted T2={unique_t2.size}"
+        )
+        print("  top-5 predicted T1/T2 pairs:")
+        for pred_t1, pred_t2, count in common_predicted_pairs(t1_map[mask], t2_map[mask], top_k=5):
+            print(f"    T1={pred_t1:.0f}, T2={pred_t2:.0f}: {count}")
+        print("  top-10 predicted T1/T2 pairs:")
+        for pred_t1, pred_t2, count in common_predicted_pairs(t1_map[mask], t2_map[mask], top_k=10):
+            print(f"    T1={pred_t1:.0f}, T2={pred_t2:.0f}: {count}")
 
 
 def print_dictionary_comparison(
@@ -154,8 +331,8 @@ def print_dictionary_comparison(
     print(header)
     print("-" * len(header))
 
-    for tissue in TISSUES:
-        mask = (phantom[..., 0] == tissue.t1) & (phantom[..., 1] == tissue.t2)
+    for tissue in reference_tissues_from_phantom(phantom):
+        mask = (phantom[..., 2] > 0) & (phantom[..., 0] == tissue.t1) & (phantom[..., 1] == tissue.t2)
         pixels = int(mask.sum())
         if pixels == 0:
             continue
@@ -183,6 +360,7 @@ def print_dictionary_comparison(
 
 
 def show_png_comparison(reference_png: Path, generated_png: Path, comparison_png: Path, show: bool) -> None:
+    print(f"\n[Visual check] Reference PNG: {reference_png}")
     if not reference_png.exists():
         print(f"\n[Visual check] Reference PNG not found, skipped: {reference_png}")
         return
@@ -214,17 +392,23 @@ def main() -> None:
     phantom_path = project_path(args.phantom)
     dictionary_path = project_path(args.dictionary)
     coeff_maps_path = project_path(args.coeff_maps)
-    reference_png = project_path(args.reference_png)
     generated_png = project_path(args.generated_png)
     comparison_png = project_path(args.comparison_png)
 
     phantom = np.load(phantom_path)
-    t1_map, t2_map, pd_map, t1_grid, t2_grid = load_matching_results(dictionary_path, coeff_maps_path)
+    reference_png = project_path(args.reference_png) if args.reference_png is not None else default_reference_png_for_phantom(phantom)
+    t1_map, t2_map, pd_map, t1_grid, t2_grid, pred_idx, dictionary_grid_shape = load_matching_results(
+        dictionary_path,
+        coeff_maps_path,
+    )
+    t1_map, t2_map, pd_map, foreground = apply_foreground_mask(t1_map, t2_map, pd_map, phantom)
 
     print_shape_checks(phantom, t1_map, t2_map, pd_map)
+    print_dictionary_debug(phantom, t1_map, t2_map, t1_grid, t2_grid, pred_idx, dictionary_grid_shape)
+    print_prediction_confusion(phantom, t1_map, t2_map)
     print_dictionary_comparison(phantom, t1_map, t2_map, pd_map, t1_grid, t2_grid)
 
-    render_quantitative_maps(t1_map, t2_map, pd_map, generated_png)
+    render_quantitative_maps(t1_map, t2_map, pd_map, generated_png, foreground)
     print(f"\n[Render] Saved current quantitative maps to: {generated_png}")
     show_png_comparison(reference_png, generated_png, comparison_png, show=not args.no_show)
 

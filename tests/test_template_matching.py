@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from mri_project.quantification import execute_template_matching, generate_mock_coeff_maps
+from mri_project.quantification import execute_template_matching, generate_mock_coeff_maps, match_dictionary_indices
 
 
 def test_execute_template_matching_recovers_exact_dictionary_entries():
@@ -29,6 +29,26 @@ def test_execute_template_matching_recovers_exact_dictionary_entries():
 
     np.testing.assert_array_equal(t1_map, [[850.0, 850.0], [1350.0, 1350.0]])
     np.testing.assert_array_equal(t2_map, [[60.0, 80.0], [60.0, 80.0]])
+    np.testing.assert_allclose(pd_map, np.linalg.norm(coeff_maps, axis=-1))
+
+
+def test_match_dictionary_indices_return_flat_argmax_indices():
+    dict_compressed = np.array(
+        [
+            [[1.0 + 0j, 0.0 + 0j], [0.0 + 1j, 0.0 + 0j]],
+            [[0.0 + 0j, 1.0 + 0j], [1.0 + 0j, 1.0 + 0j]],
+        ]
+    )
+    coeff_maps = np.array(
+        [
+            [[0.0 + 1j, 0.0 + 0j], [1.0 + 0j, 1.0 + 0j]],
+            [[0.0 + 0j, 1.0 + 0j], [1.0 + 0j, 0.0 + 0j]],
+        ]
+    )
+
+    indices, pd_map = match_dictionary_indices(coeff_maps, dict_compressed)
+
+    np.testing.assert_array_equal(indices.reshape(2, 2), [[1, 3], [2, 0]])
     np.testing.assert_allclose(pd_map, np.linalg.norm(coeff_maps, axis=-1))
 
 

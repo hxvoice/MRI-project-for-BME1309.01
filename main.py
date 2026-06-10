@@ -88,7 +88,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step-size", type=float, default=config.STEP_SIZE, help="Gradient step size.")
     parser.add_argument("--img-shape", type=int, nargs=2, default=config.IMG_SHAPE, metavar=("H", "W"))
     parser.add_argument("--patch-shape", type=int, nargs=2, default=config.PATCH_SHAPE, metavar=("H", "W"))
-    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu", help="Array backend for reconstruction/matching.")
+    parser.add_argument(
+        "--device",
+        choices=("cpu", "cuda"),
+        default="cuda",
+        help="Array backend for reconstruction/matching. Defaults to CUDA; pass cpu to run without GPU.",
+    )
     parser.add_argument("--gpu-device", type=int, default=0, help="CUDA device id used when --device cuda is selected.")
     parser.add_argument(
         "--matching-batch-size",
@@ -206,6 +211,35 @@ def kspace_matches_lightweight_defaults(n_tr: int = config.N_TR) -> Callable[[Pa
     def check(path: Path) -> bool:
         kspace = np.load(path, mmap_mode="r")
         return kspace.ndim == 3 and kspace.shape[0] == config.N_COILS and kspace.shape[1] == n_tr
+
+    return check
+
+
+def mathematical_phantom_matches_config(img_shape: tuple[int, int]) -> Callable[[Path], bool]:
+    def check(path: Path) -> bool:
+        phantom = np.load(path, mmap_mode="r")
+        if phantom.shape != (*img_shape, 3):
+            return False
+        foreground = phantom[..., 2] > 0
+        if not np.any(foreground):
+            return False
+        expected = np.array(
+            [
+                (
+                    float(values["t1"]),
+                    float(values["t2"]),
+                    float(values["pd"]),
+                )
+                for values in config.PHANTOM_TISSUES.values()
+            ],
+            dtype=np.float32,
+        )
+        actual = np.unique(np.asarray(phantom[foreground]), axis=0)
+        if actual.shape != expected.shape:
+            return False
+        actual = actual[np.lexsort((actual[:, 2], actual[:, 1], actual[:, 0]))]
+        expected = expected[np.lexsort((expected[:, 2], expected[:, 1], expected[:, 0]))]
+        return bool(np.allclose(actual, expected, rtol=0.0, atol=1e-4))
 
     return check
 
@@ -385,7 +419,7 @@ def main() -> None:
             Path("data/processed/simulated_brain_phantom.png"),
         ],
         output_checks=[
-            (Path("data/processed/brain_param_map_2d.npy"), npy_shape_is((*img_shape, 3))),
+            (Path("data/processed/brain_param_map_2d.npy"), mathematical_phantom_matches_config(img_shape)),
         ],
     )
     run_step(
