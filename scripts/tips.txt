@@ -1,0 +1,7 @@
+整个流程只需用到extract_cmrf_data,template_matching,run_recon_cmrf三个代码
+
+待修改：由于我将开源数据下载到本地路径"C:\Users\Lenovo\Desktop\open_source_cmrf_scanner_comparison"
+因此以上三个代码中有几处需要修改路径（可能需要用代码直接从开源数据的网页端下载）
+我已用“# 下方是完善时需要修改的本地路径”在代码中标出
+
+运行整个流程：除去路径问题，只需问AI要pip install 什么，即可跑通整个流程

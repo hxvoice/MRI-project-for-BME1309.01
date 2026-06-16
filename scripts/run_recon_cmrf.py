@@ -23,6 +23,7 @@ def main():
     args = parser.parse_args()
 
     # 1. 设定输入与输出路径
+    # 下方是完善时需要修改的本地路径
     input_dir = Path(r"C:\Users\Lenovo\Desktop\open_source_cmrf_scanner_comparison\scanner1\processed")
     output_dir = Path("data/output")
     output_dir.mkdir(parents=True, exist_ok=True)

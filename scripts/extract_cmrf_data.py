@@ -129,7 +129,7 @@ def process_and_intercept_cmrf_data(scanner_dir, scan_name, fa, t1, t2):
     _, signals = epg_sequence(params)
     
     # 将信号按时间维度堆叠: (705, N_dict)
-    signal_dictionary = torch.stack(signals, dim=0).abs()
+    signal_dictionary = torch.stack(signals, dim=0)
 
     # 对完整字典在时间维度上进行归一化
     vector_norm = torch.linalg.vector_norm(signal_dictionary, dim=0)
@@ -142,6 +142,7 @@ def process_and_intercept_cmrf_data(scanner_dir, scan_name, fa, t1, t2):
     
     return full_dict_np, t1_valid_np, t2_valid_np, kspace_np, traj_np, csm_np
 
+# 下方是完善时需要修改的本地路径
 def main():
     base_dir = Path(r"C:\Users\Lenovo\Desktop\open_source_cmrf_scanner_comparison")
     scanner_dir = base_dir / "scanner1"
