@@ -6,4 +6,9 @@
 我已用“# 下方是完善时需要修改的本地路径”在代码中标出
 
 2.剩下一个非常简单的validate results模块交由肖完成
-运行整个流程：除去路径问题，只需问AI要pip install 什么，即可跑通整个流程
+
+运行整个流程：除去路径问题，只需看看缺什么库然后问AI要pip install 什么，即可跑通整个流程
+注意：需要在命令行输入指令依次运行这三个代码，并显式传参
+eg：python scripts/extract_cmrf_data.py
+python scripts/run_recon_cmrf.py --n-iter 60 --lambda-llr 0.005 --device cuda
+python scripts/template_matching.py --device cuda
