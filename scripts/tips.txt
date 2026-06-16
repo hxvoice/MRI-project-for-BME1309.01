@@ -7,6 +7,8 @@
 
 2.剩下一个非常简单的validate results模块交由肖完成
 
+3.可以问AI尝试一下更改别的“对开源数据有用的参数”参数，参考pipeline_config，目前只改了正则化权重和迭代次数。
+
 运行整个流程：除去路径问题，只需看看缺什么库然后问AI要pip install 什么，即可跑通整个流程
 注意：需要在命令行输入指令依次运行这三个代码，并显式传参
 eg：python scripts/extract_cmrf_data.py
