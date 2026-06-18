@@ -460,6 +460,7 @@ def main() -> None:
         args=[
             "--save-path",
             "data/output/quantitative_maps.png",
+            "--no-show",
             "--device",
             args.device,
             "--gpu-device",

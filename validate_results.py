@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import sys
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -182,7 +185,7 @@ def print_dictionary_comparison(
     print(f"Background mean PD: {float(np.mean(pd_map[~foreground])):.3f}")
 
 
-def show_png_comparison(reference_png: Path, generated_png: Path, comparison_png: Path, show: bool) -> None:
+def show_png_comparison(reference_png: Path, generated_png: Path, comparison_png: Path) -> None:
     if not reference_png.exists():
         print(f"\n[Visual check] Reference PNG not found, skipped: {reference_png}")
         return
@@ -204,8 +207,6 @@ def show_png_comparison(reference_png: Path, generated_png: Path, comparison_png
     fig.tight_layout()
     fig.savefig(comparison_png, dpi=200, bbox_inches="tight")
     print(f"\n[Visual check] Saved side-by-side comparison to: {comparison_png}")
-    if show:
-        plt.show()
     plt.close(fig)
 
 
@@ -226,7 +227,7 @@ def main() -> None:
 
     render_quantitative_maps(t1_map, t2_map, pd_map, generated_png)
     print(f"\n[Render] Saved current quantitative maps to: {generated_png}")
-    show_png_comparison(reference_png, generated_png, comparison_png, show=not args.no_show)
+    show_png_comparison(reference_png, generated_png, comparison_png)
 
 
 if __name__ == "__main__":

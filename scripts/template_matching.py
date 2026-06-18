@@ -5,6 +5,9 @@ from pathlib import Path
 import sys
 import time
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -42,7 +45,6 @@ def plot_quantitative_maps(
     t2_map: np.ndarray,
     pd_map: np.ndarray,
     save_path: Path | None = None,
-    show: bool = True,
 ) -> None:
     """Render final T1, T2, and PD maps."""
 
@@ -67,8 +69,6 @@ def plot_quantitative_maps(
         save_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         print(f"[Render] Saved quantitative maps to: {save_path}")
-    if show:
-        plt.show()
     plt.close(fig)
 
 
@@ -117,7 +117,7 @@ def main() -> None:
     save_path = args.save_path
     if not save_path.is_absolute():
         save_path = project_root / save_path
-    plot_quantitative_maps(t1_result, t2_result, pd_result, save_path=save_path, show=not args.no_show)
+    plot_quantitative_maps(t1_result, t2_result, pd_result, save_path=save_path)
     print("\n>>> Template matching pipeline finished <<<")
 
 
