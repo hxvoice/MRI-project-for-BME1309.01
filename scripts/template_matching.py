@@ -4,6 +4,9 @@ from pathlib import Path
 import sys
 import time
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -31,7 +34,11 @@ def plot_quantitative_maps(t1_map: np.ndarray, t2_map: np.ndarray, pd_map: np.nd
 
     plt.suptitle("MR Fingerprinting Quantitative Maps", fontsize=16)
     plt.tight_layout()
-    plt.show()
+    output_path = Path(__file__).resolve().parents[1] / "data" / "output" / "quantitative_maps.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"[Render] Saved quantitative maps to: {output_path}")
+    plt.close(fig)
 
 
 def load_dictionary(dict_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
