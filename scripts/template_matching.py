@@ -17,13 +17,36 @@ from pathlib import Path
 import sys
 import time
 
-import matplotlib.pyplot as plt
+import matplotlib
 import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+import pipeline_config as config
+
+
+_PYPLOT = None
+
+
+def configure_pyplot(show: bool) -> None:
+    global _PYPLOT
+
+    if _PYPLOT is not None:
+        return
+    if not show:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as pyplot
+
+    _PYPLOT = pyplot
+
+
+def get_pyplot():
+    if _PYPLOT is None:
+        configure_pyplot(show=False)
+    return _PYPLOT
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,56 +57,63 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--coeff-maps",
         type=Path,
-        default=Path("data/output/reconstructed_coeff_maps.npy"),
+        default=config.CMRF_COEFF_MAPS_PATH,
         help="Input reconstructed coefficient maps. Expected shape [H, W, rank] or [rank, H, W].",
     )
 
-    # 下方是完善时需要修改的本地路径
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=config.CMRF_PROCESSED_DIR,
+        help="Processed cMRF directory used when --dict-path is omitted.",
+    )
+
     parser.add_argument(
         "--dict-path",
         type=Path,
-        default=Path(r"C:\Users\Lenovo\Desktop\open_source_cmrf_scanner_comparison\scanner1\processed\mrf_dictionary_data.npz"),
-        help="Input dictionary npz file.",
+        default=None,
+        help="Input dictionary npz file. Defaults to <input-dir>/mrf_dictionary_data.npz.",
     )
 
     parser.add_argument(
         "--save-path",
         type=Path,
-        default=Path("data/output/quantitative_maps.png"),
+        default=config.CMRF_QUANT_PNG_PATH,
         help="Path used to save the rendered T1/T2/PD map figure.",
     )
 
     parser.add_argument(
         "--save-npz",
         type=Path,
-        default=Path("data/output/quantitative_maps.npz"),
+        default=config.CMRF_QUANT_NPZ_PATH,
         help="Path used to save raw T1/T2/PD maps.",
     )
 
     parser.add_argument(
         "--no-show",
         action="store_true",
-        help="Save the figure without opening the interactive popup window.",
+        help="Deprecated compatibility flag; figures are saved without popups by default.",
     )
+    parser.add_argument("--show", action="store_true", help="Open an interactive popup window after saving the figure.")
 
     parser.add_argument(
         "--device",
         choices=("cpu", "cuda"),
-        default="cpu",
+        default=config.CMRF_DEVICE,
         help="Array backend used for matching.",
     )
 
     parser.add_argument(
         "--gpu-device",
         type=int,
-        default=0,
+        default=config.CMRF_GPU_DEVICE,
         help="CUDA device id used when --device cuda is selected.",
     )
 
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=1024,
+        default=config.CMRF_MATCHING_BATCH_SIZE,
         help=(
             "Number of pixels matched per batch. "
             "Default 1024 is safer for GPU/CPU memory. "
@@ -94,14 +124,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--t1-vmax",
         type=float,
-        default=2000.0,
+        default=config.CMRF_T1_VMAX,
         help="Upper display limit for T1 map.",
     )
 
     parser.add_argument(
         "--t2-vmax",
         type=float,
-        default=150.0,
+        default=config.CMRF_T2_VMAX,
         help="Upper display limit for T2 map.",
     )
 
@@ -112,6 +142,11 @@ def resolve_path(path: Path) -> Path:
     if path.is_absolute():
         return path
     return PROJECT_ROOT / path
+
+
+def require_file(path: Path, label: str) -> None:
+    if not path.exists():
+        raise FileNotFoundError(f"Missing {label}: {path}")
 
 
 def get_first_existing_key(npz_data: np.lib.npyio.NpzFile, candidates: list[str], desc: str) -> str:
@@ -560,10 +595,11 @@ def plot_quantitative_maps(
     t2_map: np.ndarray,
     pd_map: np.ndarray,
     save_path: Path | None = None,
-    show: bool = True,
+    show: bool = False,
     t1_vmax: float = 2000.0,
     t2_vmax: float = 150.0,
 ) -> None:
+    plt = get_pyplot()
     print("\n[Render] Rendering final quantitative maps...")
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -599,16 +635,21 @@ def plot_quantitative_maps(
 
 def main() -> None:
     args = parse_args()
-
-    if args.device == "cuda":
-        check_cuda_if_needed(args.device, args.gpu_device)
+    show_figure = args.show and not args.no_show
+    configure_pyplot(show=show_figure)
 
     print("\n>>> Starting REAL cMRF flattened template matching pipeline <<<")
 
-    dict_path = resolve_path(args.dict_path)
+    input_dir = resolve_path(args.input_dir)
+    dict_path = resolve_path(args.dict_path) if args.dict_path is not None else input_dir / "mrf_dictionary_data.npz"
     coeff_maps_path = resolve_path(args.coeff_maps)
     save_path = resolve_path(args.save_path)
     save_npz_path = resolve_path(args.save_npz)
+    require_file(dict_path, "processed dictionary")
+    require_file(coeff_maps_path, "reconstructed coefficient maps")
+
+    if args.device == "cuda":
+        check_cuda_if_needed(args.device, args.gpu_device)
 
     # ------------------------------------------------------------
     # 1. Load dictionary
@@ -722,7 +763,7 @@ def main() -> None:
         t2_result,
         pd_result,
         save_path=save_path,
-        show=not args.no_show,
+        show=show_figure,
         t1_vmax=args.t1_vmax,
         t2_vmax=args.t2_vmax,
     )

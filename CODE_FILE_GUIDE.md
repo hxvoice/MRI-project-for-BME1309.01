@@ -1,71 +1,117 @@
-# 代码文件作用说明
+# 代码文件说明
 
-本文档按当前仓库结构说明各代码文件的职责、主要输入输出，以及调参后应该从哪一步重新运行。
+本文档说明当前仓库的主要运行方式、文件职责、输入输出和常用调参位置。
 
-## 目录结构
+## 推荐流程：真实 cMRF 数据
+
+当前项目推荐使用真实 cMRF scanner 数据流程。数据目录需要满足：
 
 ```text
-.
-├── CODE_FILE_GUIDE.md
-├── README.md
-├── main.py
-├── pipeline_config.py
-├── pyproject.toml
-├── validate_results.py
-├── scripts/
-│   ├── build_dictionary.py
-│   ├── generate_traj.py
-│   ├── prepare_phantom.py
-│   ├── run_forward_sim.py
-│   ├── run_recon.py
-│   └── template_matching.py
-├── src/
-│   └── mri_project/
-│       ├── dictionary/
-│       │   ├── __init__.py
-│       │   └── epg.py
-│       ├── forward/
-│       │   ├── __init__.py
-│       │   ├── io.py
-│       │   ├── phantom.py
-│       │   ├── simulation.py
-│       │   └── trajectory.py
-│       ├── quantification/
-│       │   ├── __init__.py
-│       │   └── template_matching.py
-│       └── recon/
-│           ├── __init__.py
-│           ├── iterative.py
-│           ├── nufft_ops.py
-│           ├── regularization.py
-│           ├── sensitivity.py
-│           └── subspace_ops.py
-└── tests/
-    ├── test_iterative_recon.py
-    ├── test_nufft_ops.py
-    ├── test_regularization.py
-    ├── test_sensitivity.py
-    ├── test_smoke.py
-    ├── test_subspace_ops.py
-    └── test_template_matching.py
+CMRF_DATA_ROOT/
+  cMRF_fa_705rep.txt
+  scanner1/
+    cMRF.h5
 ```
 
-本地运行时还会生成 `.numba_cache/`、`.pytest_cache/`、`data/processed/`、`data/output/` 等目录。这些主要是缓存和实验结果，通常不需要提交到 Git。
+设置数据根目录有两种方式。
 
-## 根目录文件
+方式一：修改 `pipeline_config.py`：
 
-| 文件 | 作用 |
+```python
+CMRF_DATA_ROOT = Path(r"/your/path/open_source_cmrf_scanner_comparison")
+```
+
+方式二：使用环境变量，不改代码：
+
+```bash
+export CMRF_DATA_ROOT=/your/path/open_source_cmrf_scanner_comparison
+```
+
+PowerShell：
+
+```powershell
+$env:CMRF_DATA_ROOT="D:\your\path\open_source_cmrf_scanner_comparison"
+```
+
+然后运行：
+
+```bash
+python main_cmrf.py
+```
+
+常用调参命令：
+
+```bash
+python main_cmrf.py --device cuda --n-iter 60 --lambda-llr 0.005 --matching-batch-size 2048
+```
+
+## cMRF 流程文件
+
+| 文件 | 作用 | 主要输入 | 主要输出 |
+| --- | --- | --- | --- |
+| `main_cmrf.py` | cMRF 一键入口。按顺序执行数据提取、重建和 template matching，并用 fingerprint 判断是否需要重跑。 | `pipeline_config.py`、原始 cMRF 数据 | `data/output/` 下的最终结果 |
+| `scripts/extract_cmrf_data.py` | 读取真实 cMRF scanner 数据，估计 CSM，构建 EPG 字典并做 SVD 压缩。 | `CMRF_DATA_ROOT/cMRF_fa_705rep.txt`、`CMRF_DATA_ROOT/scanner1/cMRF.h5` | `CMRF_DATA_ROOT/scanner1/processed/mrf_dictionary_data.npz`、`mrf_kspace_noisy.npy`、`traj_full_2d.npy`、`csm.npy` |
+| `scripts/run_recon_cmrf.py` | 对真实 cMRF 数据执行 subspace LLR 重建。 | processed k-space、trajectory、CSM、dictionary bases | `data/output/reconstructed_coeff_maps.npy`，可选 `recon_loss.npy` |
+| `scripts/template_matching.py` | 执行 flattened dictionary template matching，并生成 T1/T2/PD 定量图。 | dictionary npz、重建系数图 | `data/output/quantitative_maps.png`、`data/output/quantitative_maps.npz` |
+
+单步调试：
+
+```bash
+python scripts/extract_cmrf_data.py
+python scripts/run_recon_cmrf.py
+python scripts/template_matching.py
+```
+
+`main_cmrf.py` 常用参数：
+
+| 参数 | 用途 |
 | --- | --- |
-| `main.py` | 一键运行完整 2D MRF pipeline：轨迹生成、phantom 准备、字典构建、正演 k-space、LLR 子空间重建、template matching 绘图。会跳过已经存在且形状检查通过的中间结果。 |
-| `pipeline_config.py` | 集中保存默认参数，例如图像大小、TR 数、子空间 rank、LLR 参数、轨迹参数、噪声水平等。文件末尾有“改参数后需要重跑哪些脚本”的注释。 |
-| `validate_results.py` | 验证脚本。读取 phantom 真值、字典和重建系数图，执行 template matching，按 WM/GM/CSF 输出 T1/T2 与字典值的比较结果，并生成参考图与当前结果图的拼接 PNG。 |
-| `README.md` | 项目简要说明，包括安装、推荐运行顺序和测试方式。 |
-| `pyproject.toml` | Python 包与测试配置，声明依赖和 `pytest` 的 `src` 搜索路径。 |
-| `CODE_FILE_GUIDE.md` | 当前文件，用于快速理解代码结构和运行流程。 |
+| `--skip-extract` | 跳过数据提取，复用已有 processed 数据。 |
+| `--skip-recon` | 跳过重建，复用已有 coefficient maps。 |
+| `--skip-matching` | 跳过 template matching。 |
+| `--force` | 即使输出看起来是最新的，也强制重跑未跳过的步骤。 |
+| `--base-dir` | 临时覆盖 `CMRF_DATA_ROOT`。 |
+| `--processed-dir` | 临时覆盖 processed 输入/输出目录。 |
+| `--output-dir` | 临时覆盖最终输出目录。 |
+| `--device` | 选择 `cpu` 或 `cuda`。 |
+| `--n-iter` | 覆盖 LLR 重建迭代次数。 |
+| `--lambda-llr` | 覆盖 LLR 正则化权重。 |
+| `--matching-batch-size` | 覆盖 template matching batch size。 |
 
-## 推荐运行方式
+## cMRF 配置项
 
-完整流程：
+cMRF 默认配置集中在 `pipeline_config.py`：
+
+| 参数 | 含义 |
+| --- | --- |
+| `CMRF_DATA_ROOT` | cMRF 数据根目录，包含 `cMRF_fa_705rep.txt` 和 `scanner1/cMRF.h5`；可被环境变量 `CMRF_DATA_ROOT` 覆盖。 |
+| `CMRF_SCANNER`、`CMRF_SCAN_NAME`、`CMRF_FA_FILE` | scanner 文件夹和原始数据文件名。 |
+| `CMRF_PROCESSED_DIR` | 数据提取后的 processed 数组目录。 |
+| `CMRF_OUTPUT_DIR` | 重建和 matching 的最终输出目录。 |
+| `CMRF_SUBSPACE_RANK` | cMRF 字典 SVD 压缩后的子空间 rank。 |
+| `CMRF_N_ITER`、`CMRF_LAMBDA_LLR` | LLR 重建迭代次数和正则化权重。 |
+| `CMRF_DEVICE`、`CMRF_GPU_DEVICE` | 默认计算后端和 CUDA 设备编号。 |
+| `CMRF_MATCHING_BATCH_SIZE` | template matching 的 batch size。 |
+| `CMRF_T1_GRID_RANGES`、`CMRF_T2_GRID_RANGES` | 真实 cMRF 字典的 T1/T2 网格范围。 |
+| `CMRF_T1_VMAX`、`CMRF_T2_VMAX` | 定量图显示上限。 |
+
+## 服务器运行说明
+
+`scripts/template_matching.py` 默认只保存图片，不弹窗，适合服务器运行。
+
+如果在本地桌面环境想显示窗口，可以显式传：
+
+```bash
+python scripts/template_matching.py --show
+```
+
+`--no-show` 仍然保留，用于兼容旧命令。
+
+## 模拟 2D MRF 流程
+
+原来的 synthetic 2D MRF 流程仍然可用，但没有合并进 `main_cmrf.py`。
+
+完整运行：
 
 ```bash
 python main.py
@@ -83,170 +129,65 @@ python scripts/template_matching.py
 python validate_results.py
 ```
 
-只保存图片、不弹窗：
+模拟流程的主要参数也在 `pipeline_config.py`：
 
-```bash
-python scripts/template_matching.py --no-show
-python validate_results.py --no-show
+| 参数 | 含义 |
+| --- | --- |
+| `IMG_SHAPE` | phantom 和重建图像大小。 |
+| `N_COILS` | 模拟线圈数。 |
+| `N_TR` | 时间点数量。 |
+| `SUBSPACE_RANK` | 字典子空间 rank。 |
+| `N_ITER`、`LAMBDA_LLR`、`STEP_SIZE`、`PATCH_SHAPE` | 模拟流程重建默认参数。 |
+| `SPIRAL_*`、`TINY_GOLDEN_ANGLE` | spiral trajectory 参数。 |
+| `EPG_*`、`FA_*`、`T1_GRID_RANGES`、`T2_GRID_RANGES` | 模拟字典参数。 |
+
+## 输出数据流
+
+真实 cMRF 流程：
+
+```text
+scripts/extract_cmrf_data.py
+    <- CMRF_DATA_ROOT/cMRF_fa_705rep.txt
+    <- CMRF_DATA_ROOT/scanner1/cMRF.h5
+    -> CMRF_DATA_ROOT/scanner1/processed/mrf_dictionary_data.npz
+    -> CMRF_DATA_ROOT/scanner1/processed/mrf_kspace_noisy.npy
+    -> CMRF_DATA_ROOT/scanner1/processed/traj_full_2d.npy
+    -> CMRF_DATA_ROOT/scanner1/processed/csm.npy
+
+scripts/run_recon_cmrf.py
+    <- CMRF_DATA_ROOT/scanner1/processed/*
+    -> data/output/reconstructed_coeff_maps.npy
+    -> data/output/recon_loss.npy
+
+scripts/template_matching.py
+    <- data/output/reconstructed_coeff_maps.npy
+    <- CMRF_DATA_ROOT/scanner1/processed/mrf_dictionary_data.npz
+    -> data/output/quantitative_maps.png
+    -> data/output/quantitative_maps.npz
 ```
 
-## 流程脚本
+模拟流程：
 
-| 文件 | 作用 | 主要输入 | 主要输出 |
-| --- | --- | --- | --- |
-| `scripts/generate_traj.py` | 生成 2D tiny-golden-angle spiral 轨迹。 | `pipeline_config.py` 中的轨迹参数 | `data/processed/traj_full_2d.npy`、`data/processed/first5_traj.png` |
-| `scripts/prepare_phantom.py` | 生成简化 2D brain phantom，包含 T1、T2、PD 三通道。 | `IMG_SHAPE` | `data/processed/brain_param_map_2d.npy`、`data/processed/simulated_brain_phantom.png` |
-| `scripts/build_dictionary.py` | 生成 flip-angle train，使用 EPG 构建 MRF 字典，并用 SVD 压缩到子空间。 | `N_TR`、`SUBSPACE_RANK`、`EPG_NUM_STATES` | `data/processed/mrf_dictionary_data.npz` |
-| `scripts/run_forward_sim.py` | 用 phantom、轨迹和字典模拟多线圈非笛卡尔 k-space，并加入噪声。 | phantom、trajectory、dictionary | `data/output/mrf_kspace_2d_noisy.npy` |
-| `scripts/run_recon.py` | 估计 coil sensitivity，执行带 LLR 正则的子空间重建。 | k-space、trajectory、dictionary bases | `data/output/reconstructed_coeff_maps.npy` |
-| `scripts/template_matching.py` | 读取重建系数图和压缩字典，输出 T1/T2/PD 定量图。 | `reconstructed_coeff_maps.npy`、`mrf_dictionary_data.npz` | 弹窗显示定量图，并保存 `data/output/quantitative_maps.png` |
-
-`scripts/template_matching.py` 支持：
-
-```bash
-python scripts/template_matching.py --save-path data/output/quantitative_maps.png
-python scripts/template_matching.py --no-show
+```text
+main.py
+    -> data/processed/*
+    -> data/output/*
 ```
 
-## 验证脚本
-
-`validate_results.py` 用于结果检查，不参与生成原始重建结果。它会：
-
-1. 读取 `data/processed/brain_param_map_2d.npy` 作为 phantom 真值。
-2. 读取 `data/processed/mrf_dictionary_data.npz` 中的 T1/T2 字典网格和压缩字典。
-3. 读取 `data/output/reconstructed_coeff_maps.npy`，重新执行 template matching。
-4. 按 WM、GM、CSF 区域输出 T1/T2 的均值、MAE、exact match 比例和 PD 均值。
-5. 保存当前定量图到 `data/output/quantitative_maps.png`。
-6. 将参考 PNG 和当前代码输出 PNG 左右拼接，保存为 `data/output/validation_comparison.png`，并默认弹窗显示。
-
-默认运行：
-
-```bash
-python validate_results.py
-```
-
-常用参数：
-
-```bash
-python validate_results.py --no-show
-python validate_results.py --reference-png path/to/reference.png
-python validate_results.py --generated-png data/output/quantitative_maps.png
-python validate_results.py --comparison-png data/output/validation_comparison.png
-```
-
-## 参数文件
-
-`pipeline_config.py` 中的主要参数分组如下：
-
-| 参数 | 作用 |
-| --- | --- |
-| `IMG_SHAPE` | 重建图像大小，也是 phantom 默认大小。 |
-| `N_COILS` | 正演模拟的线圈数。 |
-| `N_TR` | MRF 时间点数量，会影响轨迹、字典、k-space 和重建。 |
-| `SUBSPACE_RANK` | 字典 SVD 压缩后的子空间维度，也是重建系数图最后一维大小。 |
-| `N_ITER` | LLR 重建迭代次数。 |
-| `LAMBDA_LLR` | LLR 正则化权重 lambda。 |
-| `STEP_SIZE` | 重建梯度下降步长。 |
-| `PATCH_SHAPE` | LLR patch 大小。 |
-| `CENTER_WIDTH`、`CALIB_WIDTH` | sensitivity map 估计时使用的中心 k-space 和 ESPIRiT 校准宽度。 |
-| `SPIRAL_*`、`TINY_GOLDEN_ANGLE` | spiral trajectory 相关参数。 |
-| `EPG_NUM_STATES` | EPG 仿真状态数。 |
-| `NOISE_LEVEL` | 正演模拟加入的噪声水平。 |
-| `RANDOM_SEED` | 正演噪声随机种子。 |
-
-调参后建议按 `pipeline_config.py` 文件末尾的 rerun guide 手动运行对应脚本。注意：`main.py` 会跳过已有且 shape 合法的输出文件，所以只改参数后直接 `python main.py` 不一定会刷新旧结果。
-
-## Python 包模块
-
-### Dictionary
-
-| 文件 | 作用 |
-| --- | --- |
-| `src/mri_project/dictionary/__init__.py` | 导出字典模块公共 API。 |
-| `src/mri_project/dictionary/epg.py` | 实现 MRF FISP EPG 信号仿真、flip-angle train 生成、T1/T2 字典构建和 SVD 子空间压缩。 |
-
-### Forward
-
-| 文件 | 作用 |
-| --- | --- |
-| `src/mri_project/forward/__init__.py` | 导出 forward 模块公共 API。 |
-| `src/mri_project/forward/trajectory.py` | 生成单条和多 TR 旋转的 2D variable-density spiral trajectory。 |
-| `src/mri_project/forward/phantom.py` | 构造简化 brain phantom，包含 WM、GM、CSF 的 T1/T2/PD 参数。 |
-| `src/mri_project/forward/simulation.py` | 根据 phantom、MRF 字典、轨迹和 coil sensitivity 模拟 k-space 数据。 |
-| `src/mri_project/forward/io.py` | 保存 `.npy`，绘制轨迹图和 phantom 参数图。 |
-
-### Quantification
-
-| 文件 | 作用 |
-| --- | --- |
-| `src/mri_project/quantification/__init__.py` | 导出 template matching 相关 API。 |
-| `src/mri_project/quantification/template_matching.py` | 使用归一化复内积执行压缩字典 template matching，输出 T1、T2 和 PD map。 |
-
-### Recon
-
-| 文件 | 作用 |
-| --- | --- |
-| `src/mri_project/recon/__init__.py` | 导出重建模块公共 API。 |
-| `src/mri_project/recon/nufft_ops.py` | 封装 2D NUFFT forward/adjoint 算子，优先使用 SigPy，必要时使用 direct NUDFT fallback。 |
-| `src/mri_project/recon/subspace_ops.py` | 实现子空间展开/投影，以及单线圈、多线圈子空间 NUFFT 算子。 |
-| `src/mri_project/recon/iterative.py` | 实现子空间梯度下降和带 LLR 正则的迭代重建。 |
-| `src/mri_project/recon/regularization.py` | 实现 non-overlapping patch 的 LLR soft-threshold 和核范数计算。 |
-| `src/mri_project/recon/sensitivity.py` | 从多线圈非笛卡尔 k-space 中估计 sensitivity maps。 |
-
-## 测试文件
-
-| 文件 | 作用 |
-| --- | --- |
-| `tests/test_smoke.py` | 冒烟测试：核心模块导入、轨迹生成、phantom 生成、正演模拟、EPG 字典构建和压缩。 |
-| `tests/test_nufft_ops.py` | 测试 NUFFT forward/adjoint 的形状、有限性和伴随一致性。 |
-| `tests/test_subspace_ops.py` | 测试子空间投影/展开，以及单线圈、多线圈子空间 NUFFT 算子。 |
-| `tests/test_iterative_recon.py` | 测试子空间梯度下降和 LLR 重建在小规模问题上能降低 loss。 |
-| `tests/test_regularization.py` | 测试 LLR 正则化函数的形状、dtype、阈值行为、核范数和非法参数检查。 |
-| `tests/test_sensitivity.py` | 测试 k-space 时间平均、中心校准数据 gridding 和 sensitivity map 估计接口。 |
-| `tests/test_template_matching.py` | 测试 template matching 能恢复精确字典条目、处理 zero signal，并检查 basis 维度不匹配报错。 |
+## 测试和静态检查
 
 运行测试：
 
 ```bash
-pytest
+python -m pytest -q
 ```
 
-## 当前数据流
+修改入口脚本后，建议额外检查：
 
-```text
-scripts/generate_traj.py
-    -> data/processed/traj_full_2d.npy
-    -> data/processed/first5_traj.png
-
-scripts/prepare_phantom.py
-    -> data/processed/brain_param_map_2d.npy
-    -> data/processed/simulated_brain_phantom.png
-
-scripts/build_dictionary.py
-    -> data/processed/mrf_dictionary_data.npz
-
-scripts/run_forward_sim.py
-    <- data/processed/brain_param_map_2d.npy
-    <- data/processed/traj_full_2d.npy
-    <- data/processed/mrf_dictionary_data.npz
-    -> data/output/mrf_kspace_2d_noisy.npy
-
-scripts/run_recon.py
-    <- data/output/mrf_kspace_2d_noisy.npy
-    <- data/processed/traj_full_2d.npy
-    <- data/processed/mrf_dictionary_data.npz
-    -> data/output/reconstructed_coeff_maps.npy
-
-scripts/template_matching.py
-    <- data/output/reconstructed_coeff_maps.npy
-    <- data/processed/mrf_dictionary_data.npz
-    -> data/output/quantitative_maps.png
-
-validate_results.py
-    <- data/processed/brain_param_map_2d.npy
-    <- data/processed/mrf_dictionary_data.npz
-    <- data/output/reconstructed_coeff_maps.npy
-    <- data/processed/simulated_brain_phantom.png
-    <- data/output/quantitative_maps.png
-    -> data/output/validation_comparison.png
+```bash
+python -m py_compile pipeline_config.py main_cmrf.py scripts/extract_cmrf_data.py scripts/run_recon_cmrf.py scripts/template_matching.py
+python main_cmrf.py --help
+python scripts/extract_cmrf_data.py --help
+python scripts/run_recon_cmrf.py --help
+python scripts/template_matching.py --help
 ```
