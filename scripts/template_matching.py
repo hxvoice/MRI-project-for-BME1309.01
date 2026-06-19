@@ -1,23 +1,75 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import sys
 import time
 
 import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mri_project.quantification import execute_template_matching, generate_mock_coeff_maps
+from mri_project.quantification import execute_template_matching
 
 
-def plot_quantitative_maps(t1_map: np.ndarray, t2_map: np.ndarray, pd_map: np.ndarray) -> None:
+_PYPLOT = None
+
+
+def configure_pyplot(show: bool) -> None:
+    global _PYPLOT
+
+    if _PYPLOT is not None:
+        return
+    if not show:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as pyplot
+
+    _PYPLOT = pyplot
+
+
+def get_pyplot():
+    if _PYPLOT is None:
+        configure_pyplot(show=False)
+    return _PYPLOT
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run MRF template matching and render quantitative maps.")
+    parser.add_argument(
+        "--save-path",
+        type=Path,
+        default=Path("data/output/quantitative_maps.png"),
+        help="Path used to save the rendered T1/T2/PD map figure.",
+    )
+    parser.add_argument(
+        "--no-show",
+        action="store_true",
+        help="Deprecated compatibility flag; figures are saved without popups by default.",
+    )
+    parser.add_argument("--show", action="store_true", help="Open an interactive popup window after saving the figure.")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu", help="Array backend used for matching.")
+    parser.add_argument("--gpu-device", type=int, default=0, help="CUDA device id used when --device cuda is selected.")
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Number of pixels matched per similarity batch. Use the full image when omitted.",
+    )
+    return parser.parse_args()
+
+
+def plot_quantitative_maps(
+    t1_map: np.ndarray,
+    t2_map: np.ndarray,
+    pd_map: np.ndarray,
+    save_path: Path | None = None,
+    show: bool = False,
+) -> None:
     """Render final T1, T2, and PD maps."""
-    print("\n[Render] 渲染最终图像...")
+
+    plt = get_pyplot()
+    print("\n[Render] Rendering final quantitative maps...")
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     im1 = axes[0].imshow(t1_map, cmap="magma", vmin=0, vmax=2000)
@@ -34,15 +86,18 @@ def plot_quantitative_maps(t1_map: np.ndarray, t2_map: np.ndarray, pd_map: np.nd
 
     plt.suptitle("MR Fingerprinting Quantitative Maps", fontsize=16)
     plt.tight_layout()
-    output_path = Path(__file__).resolve().parents[1] / "data" / "output" / "quantitative_maps.png"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"[Render] Saved quantitative maps to: {output_path}")
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        print(f"[Render] Saved quantitative maps to: {save_path}")
+    if show:
+        plt.show()
     plt.close(fig)
 
 
 def load_dictionary(dict_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load the compressed dictionary package used by template matching."""
+
     dictionary_data = np.load(dict_path)
     return (
         dictionary_data["compressed_dict"],
@@ -52,39 +107,43 @@ def load_dictionary(dict_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray
 
 
 def main() -> None:
-    print(">>> 启动 MRF 模板匹配流程 <<<")
+    args = parse_args()
+    show_figure = args.show and not args.no_show
+    configure_pyplot(show=show_figure)
+    project_root = Path(__file__).resolve().parents[1]
 
-    dict_path = (
-        Path(__file__).resolve().parents[1]
-        / "data"
-        / "processed"
-        / "mrf_dictionary_data.npz"
-    )
-    print(f"\n[Init] 正在加载压缩字典:\n{dict_path}")
+    print(">>> Starting MRF template matching pipeline <<<")
+
+    dict_path = project_root / "data" / "processed" / "mrf_dictionary_data.npz"
+    print(f"\n[Init] Loading compressed dictionary:\n{dict_path}")
     dict_compressed, t1_grid, t2_grid = load_dictionary(dict_path)
-    print(f"[Init] 成功加载! 字典维度: {dict_compressed.shape}")
+    print(f"[Init] Dictionary shape: {dict_compressed.shape}")
 
-    print("\n[Mock] 正在生成用于测试的伪造 2D 系数图...")
-    coeff_maps_input = generate_mock_coeff_maps(t1_grid, t2_grid, dict_compressed)
-    print(f"[Mock] 成功伪造系数图! 维度: {coeff_maps_input.shape}")
+    coeff_maps_path = project_root / "data" / "output" / "reconstructed_coeff_maps.npy"
+    print(f"\n[Data] Loading reconstructed coefficient maps:\n{coeff_maps_path}")
+    coeff_maps_input = np.load(coeff_maps_path)
+    print(f"[Data] Coefficient map shape: {coeff_maps_input.shape}")
 
-    # When reconstructed coefficient maps are ready, replace the mock line above
-    # with loading the reconstruction output.
-
-    print("\n[Match] 开始执行大规模内积匹配 (Template Matching)...")
+    print("\n[Match] Running template matching...")
     start_time = time.time()
     t1_result, t2_result, pd_result = execute_template_matching(
         coeff_maps_input,
         dict_compressed,
         t1_grid,
         t2_grid,
+        device=args.device,
+        device_id=args.gpu_device,
+        batch_size=args.batch_size,
     )
     num_pixels = coeff_maps_input.shape[0] * coeff_maps_input.shape[1]
     elapsed = time.time() - start_time
-    print(f"[Match] 匹配完成！{num_pixels} 个像素点比对耗时: {elapsed:.3f} 秒")
+    print(f"[Match] Matched {num_pixels} pixels in {elapsed:.3f} seconds.")
 
-    plot_quantitative_maps(t1_result, t2_result, pd_result)
-    print("\n>>> 流程执行完毕 <<<")
+    save_path = args.save_path
+    if not save_path.is_absolute():
+        save_path = project_root / save_path
+    plot_quantitative_maps(t1_result, t2_result, pd_result, save_path=save_path, show=show_figure)
+    print("\n>>> Template matching pipeline finished <<<")
 
 
 if __name__ == "__main__":

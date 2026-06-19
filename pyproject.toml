@@ -11,12 +11,17 @@ requires-python = ">=3.10"
 dependencies = [
     "matplotlib",
     "numpy",
+    "pydicom",
     "scipy",
     "sigpy",
 ]
 
 [project.optional-dependencies]
 test = ["pytest"]
+gpu = [
+    "sigpy",
+    "cupy-cuda12x",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

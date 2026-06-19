@@ -6,6 +6,7 @@ from mri_project.dictionary import (
     build_signal_dictionary,
     compress_dictionary,
     generate_mrf_fa_train_spline,
+    simulate_mrf_fisp_batch,
 )
 from mri_project.forward import generate_tga_trajectory, prepare_phantom
 from mri_project.forward.simulation import simulate_kspace
@@ -42,11 +43,18 @@ def test_dictionary_simulator_smoke():
     fa_train = generate_mrf_fa_train_spline(num_trs=8, num_anchors=4)
     signal = simulator.simulate_mrf_fisp(t1=850.0, t2=60.0, fa_train=fa_train)
     legacy_signal = simulator.simulate_mrf_fisp(T1=850.0, T2=60.0, fa_train=fa_train)
+    batch_signal = simulate_mrf_fisp_batch(
+        np.array([850.0]),
+        np.array([60.0]),
+        fa_train,
+        num_states=20,
+    )
 
     assert signal.shape == (8,)
     assert np.iscomplexobj(signal)
     assert np.all(np.isfinite(signal))
     assert legacy_signal.shape == (8,)
+    np.testing.assert_allclose(batch_signal[0], signal)
 
 
 def test_small_dictionary_build_and_compression():

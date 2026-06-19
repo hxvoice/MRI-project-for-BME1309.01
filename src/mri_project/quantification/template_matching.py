@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from mri_project.array_backend import get_array_backend
+
 
 def generate_mock_coeff_maps(
     t1_grid: np.ndarray,
@@ -51,16 +53,49 @@ def execute_template_matching(
     dict_compressed: np.ndarray,
     t1_grid: np.ndarray,
     t2_grid: np.ndarray,
+    device: str = "cpu",
+    device_id: int = 0,
+    batch_size: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Match subspace coefficient maps to a compressed MRF dictionary.
 
     The match is based on maximum normalized complex inner product. Returns
     quantitative T1, T2, and proton-density maps.
     """
-    coeff_maps = np.asarray(coeff_maps)
-    dict_compressed = np.asarray(dict_compressed)
-    t1_grid = np.asarray(t1_grid)
-    t2_grid = np.asarray(t2_grid)
+    if dict_compressed.ndim != 3:
+        raise ValueError("dict_compressed must have shape (n_t1, n_t2, n_bases).")
+    if np.asarray(t1_grid).shape[0] != dict_compressed.shape[0]:
+        raise ValueError("t1_grid length must match dict_compressed.shape[0].")
+    if np.asarray(t2_grid).shape[0] != dict_compressed.shape[1]:
+        raise ValueError("t2_grid length must match dict_compressed.shape[1].")
+
+    best_match_indices, pd_map = match_dictionary_indices(
+        coeff_maps,
+        dict_compressed,
+        device=device,
+        device_id=device_id,
+        batch_size=batch_size,
+    )
+    num_t1, num_t2, _ = dict_compressed.shape
+    idx_t1, idx_t2 = np.unravel_index(best_match_indices, (num_t1, num_t2))
+    t1_map = np.asarray(t1_grid)[idx_t1].reshape(coeff_maps.shape[:2])
+    t2_map = np.asarray(t2_grid)[idx_t2].reshape(coeff_maps.shape[:2])
+    return t1_map, t2_map, pd_map
+
+
+def match_dictionary_indices(
+    coeff_maps: np.ndarray,
+    dict_compressed: np.ndarray,
+    device: str = "cpu",
+    device_id: int = 0,
+    batch_size: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return flattened best dictionary-entry indices and coefficient norms."""
+
+    backend = get_array_backend(device, device_id)
+    xp = backend.xp
+    coeff_maps = backend.to_device(coeff_maps)
+    dict_compressed = backend.to_device(dict_compressed)
 
     if coeff_maps.ndim != 3:
         raise ValueError("coeff_maps must have shape (nx, ny, n_bases).")
@@ -68,28 +103,28 @@ def execute_template_matching(
         raise ValueError("dict_compressed must have shape (n_t1, n_t2, n_bases).")
     if coeff_maps.shape[2] != dict_compressed.shape[2]:
         raise ValueError("coeff_maps and dict_compressed must have the same basis dimension.")
-    if t1_grid.shape[0] != dict_compressed.shape[0]:
-        raise ValueError("t1_grid length must match dict_compressed.shape[0].")
-    if t2_grid.shape[0] != dict_compressed.shape[1]:
-        raise ValueError("t2_grid length must match dict_compressed.shape[1].")
 
     nx, ny, num_bases = coeff_maps.shape
     num_t1, num_t2, _ = dict_compressed.shape
 
-    norm_dict = np.linalg.norm(dict_compressed, axis=-1, keepdims=True)
-    norm_dict[norm_dict == 0] = np.inf
+    norm_dict = xp.linalg.norm(dict_compressed, axis=-1, keepdims=True)
+    norm_dict = xp.where(norm_dict == 0, xp.inf, norm_dict)
     dict_flat = (dict_compressed / norm_dict).reshape(-1, num_bases)
 
-    norm_maps = np.linalg.norm(coeff_maps, axis=-1, keepdims=True)
+    norm_maps = xp.linalg.norm(coeff_maps, axis=-1, keepdims=True)
     pd_map = norm_maps.reshape(nx, ny)
-    safe_norm_maps = norm_maps.copy()
-    safe_norm_maps[safe_norm_maps == 0] = np.inf
+    safe_norm_maps = xp.where(norm_maps == 0, xp.inf, norm_maps)
     maps_flat = (coeff_maps / safe_norm_maps).reshape(-1, num_bases)
 
-    similarity = np.abs(maps_flat @ dict_flat.conj().T)
-    best_match_indices = np.argmax(similarity, axis=1)
-    idx_t1, idx_t2 = np.unravel_index(best_match_indices, (num_t1, num_t2))
+    n_pixels = maps_flat.shape[0]
+    if batch_size is None or batch_size <= 0:
+        batch_size = n_pixels
+    batch_size = int(batch_size)
+    best_match_indices = xp.empty(n_pixels, dtype=xp.int64)
 
-    t1_map = t1_grid[idx_t1].reshape(nx, ny)
-    t2_map = t2_grid[idx_t2].reshape(nx, ny)
-    return t1_map, t2_map, pd_map
+    for start in range(0, n_pixels, batch_size):
+        stop = min(start + batch_size, n_pixels)
+        similarity = xp.abs(maps_flat[start:stop] @ dict_flat.conj().T)
+        best_match_indices[start:stop] = xp.argmax(similarity, axis=1)
+
+    return backend.to_cpu(best_match_indices), backend.to_cpu(pd_map)

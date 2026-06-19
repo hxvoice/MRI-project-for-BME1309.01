@@ -6,6 +6,8 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from mri_project.array_backend import ArrayBackend, get_array_backend
+
 from .regularization import llr_nuclear_norm, llr_soft_threshold
 from .subspace_ops import (
     multicoil_subspace_nufft_adjoint,
@@ -23,11 +25,12 @@ def _validate_inputs(
     n_iter: int,
     step_size: float,
     sens_maps: np.ndarray | None,
+    backend: ArrayBackend,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[int, int], np.ndarray | None]:
-    kspace = np.asarray(kspace)
-    basis = np.asarray(basis)
-    coord = np.asarray(coord)
-    sens_maps = None if sens_maps is None else np.asarray(sens_maps)
+    kspace = backend.to_device(kspace)
+    basis = backend.to_device(basis)
+    coord = backend.to_device(coord)
+    sens_maps = None if sens_maps is None else backend.to_device(sens_maps)
 
     assert basis.ndim == 2, f"basis must have shape (n_tr, rank), got {basis.shape}"
     assert basis.shape[0] > 0 and basis.shape[1] > 0, "basis dimensions must be positive"
@@ -47,16 +50,16 @@ def _validate_inputs(
         expected_shape = (sens_maps.shape[0], *coord.shape[:2])
         assert kspace.ndim == 3, f"kspace must have shape (n_coils, n_tr, n_samples), got {kspace.shape}"
         assert kspace.shape == expected_shape, f"kspace shape {kspace.shape} must match expected shape {expected_shape}"
-        assert np.iscomplexobj(sens_maps), "sens_maps must be complex-valued"
-        assert np.all(np.isfinite(sens_maps)), "sens_maps contains non-finite values"
+        assert sens_maps.dtype.kind == "c", "sens_maps must be complex-valued"
+        assert backend.all_finite(sens_maps), "sens_maps contains non-finite values"
     assert n_iter > 0, "n_iter must be positive"
     assert step_size > 0, "step_size must be positive"
-    assert np.iscomplexobj(kspace), "kspace must be complex-valued"
+    assert kspace.dtype.kind == "c", "kspace must be complex-valued"
     assert np.issubdtype(basis.dtype, np.number), "basis must be numeric"
     assert np.issubdtype(coord.dtype, np.floating), "coord must be floating-point"
-    assert np.all(np.isfinite(kspace)), "kspace contains non-finite values"
-    assert np.all(np.isfinite(basis)), "basis contains non-finite values"
-    assert np.all(np.isfinite(coord)), "coord contains non-finite values"
+    assert backend.all_finite(kspace), "kspace contains non-finite values"
+    assert backend.all_finite(basis), "basis contains non-finite values"
+    assert backend.all_finite(coord), "coord contains non-finite values"
 
     result_dtype = np.result_type(kspace.dtype, basis.dtype, np.complex64)
     if sens_maps is not None:
@@ -78,6 +81,8 @@ def reconstruct_subspace_gd(
     n_iter: int = 30,
     step_size: float = 1e-3,
     sens_maps: np.ndarray | None = None,
+    device: str = "cpu",
+    device_id: int = 0,
 ) -> tuple[np.ndarray, list[float]]:
     """Reconstruct subspace coefficient maps with plain gradient descent.
 
@@ -85,6 +90,8 @@ def reconstruct_subspace_gd(
     LLR or any other regularization.
     """
 
+    backend = get_array_backend(device, device_id)
+    xp = backend.xp
     kspace, basis, coord, shape, sens_maps = _validate_inputs(
         kspace,
         basis,
@@ -93,14 +100,30 @@ def reconstruct_subspace_gd(
         n_iter,
         step_size,
         sens_maps,
+        backend,
     )
+
+    # ==========================================
+    # 【方案一核心修改：输入端 K 空间全局归一化】
+    # ==========================================
+    kspace_max = float(backend.scalar_to_python(xp.max(xp.abs(kspace))))
+    if kspace_max > 0:
+        kspace = kspace / kspace_max
 
     if sens_maps is None:
         adjoint = subspace_nufft_adjoint
         forward = subspace_nufft_forward
-        coeff_maps = adjoint(kspace, basis, coord, shape)
+        coeff_maps = adjoint(kspace, basis, coord, shape, device=device, device_id=device_id)
     else:
-        coeff_maps = multicoil_subspace_nufft_adjoint(kspace, basis, coord, shape, sens_maps)
+        coeff_maps = multicoil_subspace_nufft_adjoint(
+            kspace,
+            basis,
+            coord,
+            shape,
+            sens_maps,
+            device=device,
+            device_id=device_id,
+        )
 
     result_dtype = np.result_type(kspace.dtype, basis.dtype, np.complex64)
     if sens_maps is not None:
@@ -110,21 +133,44 @@ def reconstruct_subspace_gd(
 
     for _ in range(n_iter):
         if sens_maps is None:
-            pred = forward(coeff_maps, basis, coord)
+            pred = forward(coeff_maps, basis, coord, device=device, device_id=device_id)
         else:
-            pred = multicoil_subspace_nufft_forward(coeff_maps, basis, coord, sens_maps)
+            pred = multicoil_subspace_nufft_forward(
+                coeff_maps,
+                basis,
+                coord,
+                sens_maps,
+                device=device,
+                device_id=device_id,
+            )
         residual = pred - kspace
-        loss = float(0.5 * np.vdot(residual, residual).real)
-        losses.append(loss)
+        loss = float(backend.scalar_to_python(0.5 * xp.vdot(residual, residual).real))
+        
+        # 还原损失函数的尺度，保证终端输出的物理真实性
+        losses.append(loss * (kspace_max ** 2))
 
         if sens_maps is None:
-            grad = adjoint(residual, basis, coord, shape)
+            grad = adjoint(residual, basis, coord, shape, device=device, device_id=device_id)
         else:
-            grad = multicoil_subspace_nufft_adjoint(residual, basis, coord, shape, sens_maps)
+            grad = multicoil_subspace_nufft_adjoint(
+                residual,
+                basis,
+                coord,
+                shape,
+                sens_maps,
+                device=device,
+                device_id=device_id,
+            )
         coeff_maps = coeff_maps - step_size * grad.astype(coeff_maps.dtype, copy=False)
-        assert np.all(np.isfinite(coeff_maps)), "coeff_maps contains non-finite values"
+        assert backend.all_finite(coeff_maps), "coeff_maps contains non-finite values"
 
-    return coeff_maps, losses
+    # ==========================================
+    # 【方案一核心修改：输出端完美还原绝对物理尺度】
+    # ==========================================
+    if kspace_max > 0:
+        coeff_maps = coeff_maps * kspace_max
+
+    return backend.to_cpu(coeff_maps), losses
 
 
 def reconstruct_subspace_llr(
@@ -137,6 +183,8 @@ def reconstruct_subspace_llr(
     lambda_llr: float = 1e-4,
     patch_shape: Sequence[int] = (8, 8),
     sens_maps: np.ndarray | None = None,
+    device: str = "cpu",
+    device_id: int = 0,
 ) -> tuple[np.ndarray, list[float]]:
     """Reconstruct subspace coefficient maps with FISTA and LLR regularization."""
 
@@ -144,6 +192,8 @@ def reconstruct_subspace_llr(
     assert lambda_llr >= 0.0, "lambda_llr must be non-negative"
     assert np.isfinite(lambda_llr), "lambda_llr must be finite"
 
+    backend = get_array_backend(device, device_id)
+    xp = backend.xp
     kspace, basis, coord, shape, sens_maps = _validate_inputs(
         kspace,
         basis,
@@ -152,12 +202,28 @@ def reconstruct_subspace_llr(
         n_iter,
         step_size,
         sens_maps,
+        backend,
     )
 
+    # ==========================================
+    # 【方案一核心修改：输入端 K 空间全局归一化】
+    # ==========================================
+    kspace_max = float(backend.scalar_to_python(xp.max(xp.abs(kspace))))
+    if kspace_max > 0:
+        kspace = kspace / kspace_max
+
     if sens_maps is None:
-        coeff_maps = subspace_nufft_adjoint(kspace, basis, coord, shape)
+        coeff_maps = subspace_nufft_adjoint(kspace, basis, coord, shape, device=device, device_id=device_id)
     else:
-        coeff_maps = multicoil_subspace_nufft_adjoint(kspace, basis, coord, shape, sens_maps)
+        coeff_maps = multicoil_subspace_nufft_adjoint(
+            kspace,
+            basis,
+            coord,
+            shape,
+            sens_maps,
+            device=device,
+            device_id=device_id,
+        )
 
     result_dtype = np.result_type(kspace.dtype, basis.dtype, np.complex64)
     if sens_maps is not None:
@@ -170,31 +236,65 @@ def reconstruct_subspace_llr(
 
     for _ in range(n_iter):
         if sens_maps is None:
-            pred = subspace_nufft_forward(momentum_maps, basis, coord)
+            pred = subspace_nufft_forward(momentum_maps, basis, coord, device=device, device_id=device_id)
         else:
-            pred = multicoil_subspace_nufft_forward(momentum_maps, basis, coord, sens_maps)
+            pred = multicoil_subspace_nufft_forward(
+                momentum_maps,
+                basis,
+                coord,
+                sens_maps,
+                device=device,
+                device_id=device_id,
+            )
         residual = pred - kspace
 
         if sens_maps is None:
-            grad = subspace_nufft_adjoint(residual, basis, coord, shape)
+            grad = subspace_nufft_adjoint(residual, basis, coord, shape, device=device, device_id=device_id)
         else:
-            grad = multicoil_subspace_nufft_adjoint(residual, basis, coord, shape, sens_maps)
+            grad = multicoil_subspace_nufft_adjoint(
+                residual,
+                basis,
+                coord,
+                shape,
+                sens_maps,
+                device=device,
+                device_id=device_id,
+            )
 
         gradient_step = momentum_maps - step_size * grad.astype(momentum_maps.dtype, copy=False)
+        
+        # 此时传入的 threshold(step_size * lambda_llr) 将完美在 [0, 1] 尺度的奇异值上生效
         next_coeff_maps = llr_soft_threshold(
             gradient_step.astype(result_dtype, copy=False),
             patch_shape=patch_shape,
             threshold=step_size * lambda_llr,
+            device=device,
+            device_id=device_id,
+            return_cpu=False,
         ).astype(result_dtype, copy=False)
 
         if sens_maps is None:
-            current_pred = subspace_nufft_forward(next_coeff_maps, basis, coord)
+            current_pred = subspace_nufft_forward(next_coeff_maps, basis, coord, device=device, device_id=device_id)
         else:
-            current_pred = multicoil_subspace_nufft_forward(next_coeff_maps, basis, coord, sens_maps)
+            current_pred = multicoil_subspace_nufft_forward(
+                next_coeff_maps,
+                basis,
+                coord,
+                sens_maps,
+                device=device,
+                device_id=device_id,
+            )
         current_residual = current_pred - kspace
-        data_loss = float(0.5 * np.vdot(current_residual, current_residual).real)
-        reg_loss = lambda_llr * llr_nuclear_norm(next_coeff_maps, patch_shape=patch_shape)
-        losses.append(float(data_loss + reg_loss))
+        data_loss = float(backend.scalar_to_python(0.5 * xp.vdot(current_residual, current_residual).real))
+        reg_loss = lambda_llr * llr_nuclear_norm(
+            next_coeff_maps,
+            patch_shape=patch_shape,
+            device=device,
+            device_id=device_id,
+        )
+        
+        # 还原损失函数的真实尺度，确保 log 打印输出的一致性
+        losses.append(float((data_loss + reg_loss) * (kspace_max ** 2)))
 
         next_fista_t = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * fista_t * fista_t))
         momentum = (fista_t - 1.0) / next_fista_t
@@ -202,7 +302,13 @@ def reconstruct_subspace_llr(
         coeff_maps = next_coeff_maps
         fista_t = next_fista_t
 
-        assert np.all(np.isfinite(coeff_maps)), "coeff_maps contains non-finite values"
-        assert np.all(np.isfinite(momentum_maps)), "momentum_maps contains non-finite values"
+        assert backend.all_finite(coeff_maps), "coeff_maps contains non-finite values"
+        assert backend.all_finite(momentum_maps), "momentum_maps contains non-finite values"
 
-    return coeff_maps, losses
+    # ==========================================
+    # 【方案一核心修改：输出端完美还原绝对物理尺度】
+    # ==========================================
+    if kspace_max > 0:
+        coeff_maps = coeff_maps * kspace_max
+
+    return backend.to_cpu(coeff_maps), losses
