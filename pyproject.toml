@@ -13,13 +13,17 @@ dependencies = [
     "numpy",
     "scipy",
     "sigpy",
+    # --- 新增的 CMRF 脚本依赖 ---
+    "torch",
+    "einops",
+    "mrpro",
 ]
 
 [project.optional-dependencies]
 test = ["pytest"]
 gpu = [
     "sigpy",
-    "cupy-cuda12x",
+    "cupy-cuda12x", 
 ]
 
 [tool.setuptools.packages.find]
