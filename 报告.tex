@@ -1,0 +1,128 @@
+\documentclass[a4paper, 11pt]{ctexart}
+
+% ==========================================
+% 导言区：常用宏包配置
+% ==========================================
+\usepackage[margin=2.5cm]{geometry} % 页面边距
+\usepackage{amsmath, amsfonts, amssymb} % 数学公式支持
+\usepackage{graphicx} % 插入图片
+\usepackage{float} % 图片表格浮动体控制
+\usepackage{hyperref} % 交叉引用与超链接
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    citecolor=black
+}
+\usepackage{booktabs} % 三线表
+\usepackage{listings} % 插入代码
+\usepackage{xcolor} % 代码高亮颜色
+
+% 代码格式设置
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red},
+    breaklines=true,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray}
+}
+
+% ==========================================
+% 标题信息
+% ==========================================
+\title{基于子空间低秩重建的2D磁共振指纹成像仿真与验证}
+\author{BME1309.01 生医工影像导论期末项目 \\ \\ \textit{刘恒希、秦子丰、肖智健}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+% 摘要（可选，但技术报告通常建议有一段简短的执行摘要）
+\begin{abstract}
+% 摘要撰写要求：用3-4句话概括项目的核心方法（TGAS轨迹、子空间LLR重建）、主要工作（仿真跑通+真实数据验证）以及最终结论。尽量精简。
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+% ==========================================
+% 正文开始
+% ==========================================
+
+\section{项目背景与出发点}
+% 内容说明：
+% - 传统MRI的局限性（单一定性加权图像、耗时长）。
+% - MRF（磁共振指纹技术）的优势（快速、多参数定量成像）。
+% - 指出当前MRF面临的挑战（欠采样伪影、重建计算量大），引出本项目的切入点。
+
+\section{项目目的}
+% 内容说明：
+% - 核心目标：在2D场景下，利用特定算法改进MRF图像质量，缩短采集时间。
+% - 具体任务分解：轨迹设计、字典生成与压缩、低秩重建、定量图匹配。
+
+\section{核心原理与理论依据}
+% 内容说明：参考曹晓智等人的相关论文，简要罗列项目依赖的物理和数学理论，切忌长篇大论，把公式和变量说明白即可。
+\subsection{扩展相位图 (EPG) 与字典生成}
+% - 说明如何模拟不同T1、T2在特定TR下的信号演化。
+\subsection{TGAS 螺旋轨迹与 k 空间采样}
+% - 解释可变密度螺旋轨迹及 Tiny-Golden-Angle-Shuffling 旋转采样的原理和优势。
+\subsection{子空间与局部低秩 (LLR) 重建}
+% - 解释奇异值分解(SVD)降维的过程。
+% - 给出重建的目标函数公式（数据一致性项 + LLR正则化项），说明如何消除欠采样伪影。
+\subsection{模板匹配 (Template Matching)}
+% - 简述如何通过内积最大化从压缩字典中匹配出最终的 T1、T2、PD 参数。
+
+\section{代码实现手段}
+% 内容说明：直奔重点，描述代码架构和数据流向。
+\subsection{开发环境与依赖}
+% - 简要提一句基于 Python 的统一包结构，以及用到的核心库（SigPy, Torch 等）。
+\subsection{模块化流水线设计}
+% - 结合你们的 pipeline 流程，分点说明（可使用 bullet points）：
+%   1. 轨迹与体模生成模块
+%   2. 字典仿真与压缩模块
+%   3. 前向模拟模块（加噪）
+%   4. 重建与参数映射模块
+
+\section{实验流程与数据说明}
+% 内容说明：交代验证算法所用的数据来源。
+\subsection{仿真数据准备}
+% - 提及构建的 2D Phantom 及其组织参数设定。
+\subsection{真实扫描数据来源}
+% - 简短说明真实数据的来源（如开源的 cMRF 扫描数据）、数据结构（HDF5格式、FA文本）等。
+\subsection{算法检验与评估方法}
+% - 说明如何评判重建结果的好坏（例如：与 Reference 图像比对、观察伪影消除情况、对比不同迭代参数下的表现）。
+
+\section{参数调试与结果分析}
+% 内容说明：报告的核心部分。直接上图表和数据，用客观事实说话。
+\subsection{模拟参数运行与验证}
+% - 展示纯模拟流程下的跑通结果。
+% - 展示不同关键参数（如：迭代次数 \texttt{n-iter}、LLR正则化权重 \texttt{lambda-llr}、子空间维度等）对重建图像质量的影响。
+% - 简要分析哪组参数在去除伪影和保留细节上达到了最佳平衡。
+\subsection{真实扫描数据测试}
+% - 在模拟数据验证算法无误后，引入真实数据的表现。
+% - 展示基于真实数据的重建定量图（T1/T2图）。
+% - 客观分析真实数据带来的新挑战（如噪声分布更复杂、潜在的物理伪影等）以及 LLR 算法在真实数据上的鲁棒性。
+
+\section{总结与展望}
+% 内容说明：
+% - 总结已完成的核心工作和达成的效果（LLR迭代发挥作用）。
+% - 坦诚目前存在的不足（如：真实数据结果仍需优化、未加入 $B_0$ 校正等）。
+% - 提出后续改进方向。
+
+% ==========================================
+% 参考文献
+% ==========================================
+\newpage
+\begin{thebibliography}{99}
+% 在此处添加具体的参考文献引用，如项目依据的论文
+\bibitem{cao2022} 
+Xiaozhi Cao, Congyu Liao, et al. \textit{Optimized multi-axis spiral projection MR fingerprinting with subspace reconstruction for rapid whole-brain high-isotropic-resolution quantitative imaging}. Magnetic Resonance in Medicine, 2022.
+\end{thebibliography}
+
+\end{document}
